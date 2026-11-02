@@ -110,3 +110,12 @@ func ChangeUserEmailMapper(row sqlc.ChangeUserEmailRow) models.User {
 
 	return mapped
 }
+
+// CreateUserParamsMapper maps a new user onto the CreateUser insert parameters.
+func CreateUserParamsMapper(newUser models.NewUser) sqlc.CreateUserParams {
+	return sqlc.CreateUserParams{
+		ID:           newUser.ID,
+		Email:        newUser.Email,
+		PasswordHash: newUser.PasswordHash,
+	}
+}

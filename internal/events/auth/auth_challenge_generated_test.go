@@ -31,7 +31,7 @@ func TestNewAuthChallengeGeneratedCarriesTheChallenge(t *testing.T) {
 	userID := uuid.New()
 	challengeID := uuid.New()
 
-	generated, err := NewAuthChallengeGenerated(NewAuthChallengeParams{
+	generated, err := NewAuthChallengeGenerated(NewAuthChallengeGeneratedParams{
 		ChallengeID: challengeID,
 		UserID:      userID,
 		TargetType:  "email",

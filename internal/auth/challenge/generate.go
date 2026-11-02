@@ -11,7 +11,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/events/auth"
 )
 
-// GenerateDependencies carries the collaborators generating a challenge needs.
+// GenerateDependencies carries the challenge store and the dispatcher announcing the challenge with its token.
 type GenerateDependencies struct {
 	WriteRepository WriteRepository
 	EventDispatcher events.Dispatcher
@@ -25,8 +25,8 @@ type GenerateParams struct {
 	Purpose    Purpose
 }
 
-// Generated is what the caller receives, deliberately without the plaintext token.
-type Generated struct {
+// GenerateResult is what the caller receives, deliberately without the plaintext token.
+type GenerateResult struct {
 	ID        uuid.UUID
 	ExpiresAt time.Time
 }
@@ -36,17 +36,17 @@ func Generate(
 	ctx context.Context,
 	d GenerateDependencies,
 	params GenerateParams,
-) (Generated, error) {
+) (GenerateResult, error) {
 
 	if err := ensureChallengeRequestComplete(params); err != nil {
-		return Generated{}, err
+		return GenerateResult{}, err
 	}
 
 	minted := token.Generate()
 
 	expiresAt := time.Now().Add(Lifetime)
 
-	storedChallenge, err := d.WriteRepository.Save(ctx, NewChallenge{
+	storedChallenge, err := d.WriteRepository.SaveChallenge(ctx, NewChallenge{
 		ID:         uuid.New(),
 		UserID:     params.UserID,
 		TargetType: params.TargetType,
@@ -56,12 +56,12 @@ func Generate(
 		ExpiresAt:  expiresAt,
 	})
 	if err != nil {
-		return Generated{}, err
+		return GenerateResult{}, err
 	}
 
-	generated := Generated{ID: storedChallenge.ID, ExpiresAt: storedChallenge.ExpiresAt}
+	generated := GenerateResult{ID: storedChallenge.ID, ExpiresAt: storedChallenge.ExpiresAt}
 
-	auth.DispatchAuthChallengeGenerated(ctx, d.EventDispatcher, auth.NewAuthChallengeParams{
+	auth.DispatchAuthChallengeGenerated(ctx, d.EventDispatcher, auth.NewAuthChallengeGeneratedParams{
 		ChallengeID: storedChallenge.ID,
 		UserID:      storedChallenge.UserID,
 		TargetType:  string(storedChallenge.TargetType),

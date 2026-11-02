@@ -45,7 +45,7 @@ func VerificationEmailOnChallenge(
 		messageType, mailed := verificationMessageTypeByPurpose[challenge.Purpose(payload.Purpose)]
 		if !mailed {
 			logger.Debug("auth challenge ignored",
-				"challenge_id", payload.ChallengeID,
+				"challengeId", payload.ChallengeID,
 				"purpose", payload.Purpose)
 
 			return nil

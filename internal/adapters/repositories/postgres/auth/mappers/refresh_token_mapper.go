@@ -1,6 +1,8 @@
 package mappers
 
 import (
+	"time"
+
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
 )
@@ -17,4 +19,18 @@ func RefreshTokenMapper(row sqlc.RefreshToken) refreshtoken.RefreshToken {
 	}
 
 	return mapped
+}
+
+// CreateRefreshTokenParamsMapper maps a new refresh token onto the CreateRefreshToken insert parameters.
+func CreateRefreshTokenParamsMapper(
+	newRefreshToken refreshtoken.NewRefreshToken,
+	createdAt time.Time,
+) sqlc.CreateRefreshTokenParams {
+	return sqlc.CreateRefreshTokenParams{
+		ID:        newRefreshToken.ID,
+		UserID:    newRefreshToken.UserID,
+		TokenHash: newRefreshToken.TokenHash,
+		CreatedAt: createdAt,
+		ExpiresAt: newRefreshToken.ExpiresAt,
+	}
 }

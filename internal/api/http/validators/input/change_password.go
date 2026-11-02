@@ -8,11 +8,15 @@ type ChangePasswordInput struct {
 	NewPassword     string
 }
 
-// ValidateChangePasswordInput checks a current password arrived and the new one meets the password rules.
-func ValidateChangePasswordInput(changePasswordInput ChangePasswordInput) error {
+// ValidateChangePasswordInput checks both passwords against their rules, verbatim and untrimmed.
+func ValidateChangePasswordInput(changePasswordInput ChangePasswordInput) (ChangePasswordInput, error) {
 	if err := primitive.RequiredString(changePasswordInput.CurrentPassword); err != nil {
-		return primitive.ErrPasswordMissing{}
+		return ChangePasswordInput{}, primitive.ErrPasswordMissing{}
 	}
 
-	return primitive.ValidatePassword(changePasswordInput.NewPassword)
+	if err := primitive.ValidatePassword(changePasswordInput.NewPassword); err != nil {
+		return ChangePasswordInput{}, err
+	}
+
+	return changePasswordInput, nil
 }

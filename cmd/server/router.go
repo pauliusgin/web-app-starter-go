@@ -19,11 +19,14 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
-	profileusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/usecases"
+	profilequeries "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
+	profileusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/imaging"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/storage"
-	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/usecases"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
+	uploadqueries "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/queries"
+	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
+	userqueries "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/queries"
+	userusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
 
 type buildRouterDependenciesParams struct {
@@ -56,69 +59,79 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 	generateAuthChallenge := func(
 		ctx context.Context,
 		params challenge.GenerateParams,
-	) (challenge.Generated, error) {
+	) (challenge.GenerateResult, error) {
 		return challenge.Generate(ctx, generateAuthChallengeDependencies, params)
 	}
 
 	// users
-	signupUserDependencies := usecases.SignupUserDependencies{
+	signUpUserDependencies := userusecases.SignUpUserDependencies{
 		UserWriteRepository:   usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:       eventDispatcher,
 		GenerateAuthChallenge: generateAuthChallenge,
 	}
-	signupUser := func(ctx context.Context, params usecases.SignupUserParams) (usecases.SignupUserResult, error) {
-		return usecases.SignupUser(ctx, signupUserDependencies, params)
+	signUpUser := func(ctx context.Context, params userusecases.SignUpUserParams) (userusecases.SignUpUserResult, error) {
+		return userusecases.SignUpUser(ctx, signUpUserDependencies, params)
 	}
 
-	signInUserDependencies := usecases.SignInUserDependencies{
+	signInUserDependencies := userusecases.SignInUserDependencies{
 		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:     eventDispatcher,
 	}
-	signInUser := func(ctx context.Context, params usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-		return usecases.SignInUser(ctx, signInUserDependencies, params)
+	signInUser := func(ctx context.Context, params userusecases.SignInUserParams) (userusecases.SignInUserResult, error) {
+		return userusecases.SignInUser(ctx, signInUserDependencies, params)
 	}
 
-	verifyEmailDependencies := usecases.VerifyEmailDependencies{
+	verifyEmailDependencies := userusecases.VerifyEmailDependencies{
 		UserWriteRepository:          usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:              eventDispatcher,
 		FindAuthChallengeByTokenHash: authrepo.NewAuthChallengeReadRepository(queries).FindByTokenHash,
 		ConsumeAuthChallenge:         authrepo.NewAuthChallengeWriteRepository(queries).MarkUsed,
 	}
-	verifyEmail := func(ctx context.Context, params usecases.VerifyEmailParams) error {
-		return usecases.VerifyEmail(ctx, verifyEmailDependencies, params)
+	verifyEmail := func(ctx context.Context, params userusecases.VerifyEmailParams) error {
+		return userusecases.VerifyEmail(ctx, verifyEmailDependencies, params)
 	}
 
-	deleteUserDependencies := usecases.DeleteUserDependencies{
+	deleteUserDependencies := userusecases.DeleteUserDependencies{
 		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:     eventDispatcher,
 	}
-	deleteUser := func(ctx context.Context, params usecases.DeleteUserParams) error {
-		return usecases.DeleteUser(ctx, deleteUserDependencies, params)
+	deleteUser := func(ctx context.Context, params userusecases.DeleteUserParams) error {
+		return userusecases.DeleteUser(ctx, deleteUserDependencies, params)
 	}
 
-	requestEmailChangeDependencies := usecases.RequestEmailChangeDependencies{
+	requestEmailChangeDependencies := userusecases.RequestEmailChangeDependencies{
 		UserWriteRepository:   usersrepo.NewUserWriteRepository(queries),
 		GenerateAuthChallenge: generateAuthChallenge,
 	}
-	requestEmailChange := func(ctx context.Context, params usecases.RequestEmailChangeParams) error {
-		return usecases.RequestEmailChange(ctx, requestEmailChangeDependencies, params)
+	requestEmailChange := func(ctx context.Context, params userusecases.RequestEmailChangeParams) error {
+		return userusecases.RequestEmailChange(ctx, requestEmailChangeDependencies, params)
 	}
 
-	changePasswordDependencies := usecases.ChangePasswordDependencies{
+	changePasswordDependencies := userusecases.ChangePasswordDependencies{
 		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:     eventDispatcher,
 	}
-	changePassword := func(ctx context.Context, params usecases.ChangePasswordParams) error {
-		return usecases.ChangePassword(ctx, changePasswordDependencies, params)
+	changePassword := func(ctx context.Context, params userusecases.ChangePasswordParams) error {
+		return userusecases.ChangePassword(ctx, changePasswordDependencies, params)
+	}
+
+	getUserByIDDependencies := userqueries.GetUserByIDDependencies{
+		UserReadRepository: usersrepo.NewUserReadRepository(queries),
+	}
+	getUserByID := func(
+		ctx context.Context,
+		params userqueries.GetUserByIDParams,
+	) (userqueries.GetUserByIDResult, error) {
+		return userqueries.GetUserByID(ctx, getUserByIDDependencies, params)
 	}
 
 	// uploads
 	uploadFilesDependencies := uploadusecases.UploadFilesDependencies{
-		UploadRepository: uploadsrepo.NewUploadRepository(queries),
-		FileStorage:      params.FileStorage,
-		ImageProcessor:   params.ImageProcessor,
-		EventDispatcher:  eventDispatcher,
-		AppEnv:           params.AppEnv,
+		UploadWriteRepository: uploadsrepo.NewUploadWriteRepository(queries),
+		FileStorage:           params.FileStorage,
+		ImageProcessor:        params.ImageProcessor,
+		EventDispatcher:       eventDispatcher,
+		AppEnv:                params.AppEnv,
 	}
 	uploadFiles := func(
 		ctx context.Context,
@@ -127,10 +140,20 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return uploadusecases.UploadFiles(ctx, uploadFilesDependencies, params)
 	}
 
+	getUploadsByIDsDependencies := uploadqueries.GetUploadsByIDsDependencies{
+		UploadReadRepository: uploadsrepo.NewUploadReadRepository(queries),
+	}
+	getUploadsByIDs := func(
+		ctx context.Context,
+		params uploadqueries.GetUploadsByIDsParams,
+	) (uploadqueries.GetUploadsByIDsResult, error) {
+		return uploadqueries.GetUploadsByIDs(ctx, getUploadsByIDsDependencies, params)
+	}
+
 	// profiles
 	createProfileDependencies := profileusecases.CreateProfileDependencies{
-		ProfileRepository: profilesrepo.NewProfileRepository(queries),
-		EventDispatcher:   eventDispatcher,
+		ProfileWriteRepository: profilesrepo.NewProfileWriteRepository(queries),
+		EventDispatcher:        eventDispatcher,
 	}
 	createProfile := func(
 		ctx context.Context,
@@ -140,8 +163,8 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 	}
 
 	updateProfileDependencies := profileusecases.UpdateProfileDependencies{
-		ProfileRepository: profilesrepo.NewProfileRepository(queries),
-		EventDispatcher:   eventDispatcher,
+		ProfileWriteRepository: profilesrepo.NewProfileWriteRepository(queries),
+		EventDispatcher:        eventDispatcher,
 	}
 	updateProfile := func(
 		ctx context.Context,
@@ -150,14 +173,24 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return profileusecases.UpdateProfile(ctx, updateProfileDependencies, params)
 	}
 
+	getProfileByIDDependencies := profilequeries.GetProfileByIDDependencies{
+		ProfileReadRepository: profilesrepo.NewProfileReadRepository(queries),
+	}
+	getProfileByID := func(
+		ctx context.Context,
+		params profilequeries.GetProfileByIDParams,
+	) (profilequeries.GetProfileByIDResult, error) {
+		return profilequeries.GetProfileByID(ctx, getProfileByIDDependencies, params)
+	}
+
 	// refresh_tokens
-	issueRefreshTokenDependencies := refreshtoken.IssuingDependencies{
+	issueRefreshTokenDependencies := refreshtoken.IssueDependencies{
 		WriteRepository: authrepo.NewRefreshTokenWriteRepository(queries),
 	}
-	refreshTokenIssuer := func(
+	issueRefreshToken := func(
 		ctx context.Context,
-		params refreshtoken.IssuingParams,
-	) (refreshtoken.Issued, error) {
+		params refreshtoken.IssueParams,
+	) (refreshtoken.IssueResult, error) {
 		return refreshtoken.Issue(ctx, issueRefreshTokenDependencies, params)
 	}
 
@@ -165,10 +198,10 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		ReadRepository:  authrepo.NewRefreshTokenReadRepository(queries),
 		WriteRepository: authrepo.NewRefreshTokenWriteRepository(queries),
 	}
-	refreshTokenRotator := func(
+	rotateRefreshToken := func(
 		ctx context.Context,
 		params refreshtoken.RotateParams,
-	) (refreshtoken.Rotated, error) {
+	) (refreshtoken.RotateResult, error) {
 		return refreshtoken.Rotate(ctx, rotateRefreshTokenDependencies, params)
 	}
 
@@ -176,7 +209,7 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		ReadRepository:  authrepo.NewRefreshTokenReadRepository(queries),
 		WriteRepository: authrepo.NewRefreshTokenWriteRepository(queries),
 	}
-	refreshTokenRevoker := func(
+	revokeRefreshToken := func(
 		ctx context.Context,
 		params refreshtoken.RevokeParams,
 	) error {
@@ -188,20 +221,24 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		FindUserByID:     usersrepo.NewUserWriteRepository(queries).FindUserByID,
 	}
 
-	userRouterDeps := routes.UserRouterDependencies{
-		SignUp: users.SignUpUserDependencies{
-			SignupUser:        signupUser,
-			IssueRefreshToken: refreshTokenIssuer,
-			Jwt:               accessTokenIssuer,
+	userRouterDeps := routes.UserRoutesDependencies{
+		SignUpUser: users.SignUpUserDependencies{
+			SignUpUser:           signUpUser,
+			GetUserReadModelByID: usersrepo.NewUserReadRepository(queries).GetUserReadModelByID,
+			IssueRefreshToken:    issueRefreshToken,
+			Jwt:                  accessTokenIssuer,
 		},
-		SignIn: users.SignInUserDependencies{
-			SignInUser:            signInUser,
-			FindUserReadModelByID: usersrepo.NewUserReadRepository(queries).FindUserReadModelByID,
-			IssueRefreshToken:     refreshTokenIssuer,
-			Jwt:                   accessTokenIssuer,
+		SignInUser: users.SignInUserDependencies{
+			SignInUser:           signInUser,
+			GetUserReadModelByID: usersrepo.NewUserReadRepository(queries).GetUserReadModelByID,
+			IssueRefreshToken:    issueRefreshToken,
+			Jwt:                  accessTokenIssuer,
 		},
 		VerifyEmail: users.VerifyEmailDependencies{
 			VerifyEmail: verifyEmail,
+		},
+		GetUserByID: users.GetUserByIDDependencies{
+			GetUserByID: getUserByID,
 		},
 		DeleteUser: users.DeleteUserDependencies{
 			DeleteUser: deleteUser,
@@ -215,29 +252,32 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		RequireAuthenticatedUser: requireAuthenticatedUser,
 	}
 
-	authRouterDeps := routes.AuthRouterDependencies{
-		RotateRefreshToken: tokens.RotateDependencies{
-			RotateRefreshToken: refreshTokenRotator,
+	authRouterDeps := routes.TokenRoutesDependencies{
+		RotateRefreshToken: tokens.RotateRefreshTokenDependencies{
+			RotateRefreshToken: rotateRefreshToken,
 			FindUserByID:       usersrepo.NewUserWriteRepository(queries).FindUserByID,
 			Jwt:                accessTokenIssuer,
 		},
 		RevokeRefreshToken: tokens.RevokeRefreshTokenDependencies{
-			RevokeRefreshToken: refreshTokenRevoker},
+			RevokeRefreshToken: revokeRefreshToken},
 	}
 
-	uploadRouterDeps := routes.UploadRouterDependencies{
+	uploadRouterDeps := routes.UploadRoutesDependencies{
 		UploadFiles: uploads.UploadFilesDependencies{
-			UploadFiles: uploadFiles,
+			UploadFiles:     uploadFiles,
+			GetUploadsByIDs: getUploadsByIDs,
 		},
 		RequireAuthenticatedUser: requireAuthenticatedUser,
 	}
 
-	profileRouterDeps := routes.ProfileRouterDependencies{
+	profileRouterDeps := routes.ProfileRoutesDependencies{
 		CreateProfile: profiles.CreateProfileDependencies{
-			CreateProfile: createProfile,
+			CreateProfile:  createProfile,
+			GetProfileByID: getProfileByID,
 		},
 		UpdateProfile: profiles.UpdateProfileDependencies{
-			UpdateProfile: updateProfile,
+			UpdateProfile:  updateProfile,
+			GetProfileByID: getProfileByID,
 		},
 		RequireAuthenticatedUser: requireAuthenticatedUser,
 	}

@@ -11,7 +11,7 @@ import (
 func TestDeleteUserRefreshTokensSurfacesADeleteFailureUnchanged(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
-	store.deleteFailure = ErrDeleteRefreshTokensFailed{Cause: cause}
+	store.DeleteFailure = ErrDeleteRefreshTokensFailed{Cause: cause}
 
 	err := DeleteUserRefreshTokens(context.Background(),
 		DeleteUserRefreshTokensDependencies{WriteRepository: store},

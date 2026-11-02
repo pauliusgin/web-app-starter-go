@@ -7,7 +7,13 @@ type RequestEmailChangeInput struct {
 	NewEmail string
 }
 
-// ValidateRequestEmailChangeInput checks the new email is a plain address.
-func ValidateRequestEmailChangeInput(requestEmailChangeInput RequestEmailChangeInput) error {
-	return primitive.ValidateEmail(requestEmailChangeInput.NewEmail)
+// ValidateRequestEmailChangeInput normalizes the new email and checks it is a plain address.
+func ValidateRequestEmailChangeInput(rawInput RequestEmailChangeInput) (RequestEmailChangeInput, error) {
+	requestEmailChangeInput := RequestEmailChangeInput{NewEmail: primitive.NormalizeEmail(rawInput.NewEmail)}
+
+	if err := primitive.ValidateEmail(requestEmailChangeInput.NewEmail); err != nil {
+		return RequestEmailChangeInput{}, err
+	}
+
+	return requestEmailChangeInput, nil
 }

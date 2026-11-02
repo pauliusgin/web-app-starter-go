@@ -2,7 +2,10 @@
 package mappers
 
 import (
+	"time"
+
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
+	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlnull"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
 )
 
@@ -24,4 +27,21 @@ func AuthChallengeMapper(row sqlc.AuthChallenge) challenge.Challenge {
 	}
 
 	return mapped
+}
+
+// CreateAuthChallengeParamsMapper maps a new challenge onto the CreateAuthChallenge insert parameters.
+func CreateAuthChallengeParamsMapper(
+	newChallenge challenge.NewChallenge,
+	createdAt time.Time,
+) sqlc.CreateAuthChallengeParams {
+	return sqlc.CreateAuthChallengeParams{
+		ID:         newChallenge.ID,
+		UserID:     newChallenge.UserID,
+		TargetType: string(newChallenge.TargetType),
+		Target:     newChallenge.Target,
+		Purpose:    string(newChallenge.Purpose),
+		TokenHash:  sqlnull.StringUnlessEmpty(newChallenge.TokenHash),
+		CreatedAt:  createdAt,
+		ExpiresAt:  newChallenge.ExpiresAt,
+	}
 }

@@ -8,15 +8,20 @@ type SignInInput struct {
 	Password string
 }
 
-// ValidateSignInInput checks the email shape and that a password arrived, reporting the first failure.
-func ValidateSignInInput(signInInput SignInInput) error {
+// ValidateSignInInput normalizes the email, checks its shape and that a password arrived, reporting the first failure.
+func ValidateSignInInput(rawInput SignInInput) (SignInInput, error) {
+	signInInput := SignInInput{
+		Email:    primitive.NormalizeEmail(rawInput.Email),
+		Password: rawInput.Password,
+	}
+
 	if err := primitive.ValidateEmail(signInInput.Email); err != nil {
-		return err
+		return SignInInput{}, err
 	}
 
 	if err := primitive.RequiredString(signInInput.Password); err != nil {
-		return primitive.ErrPasswordMissing{}
+		return SignInInput{}, primitive.ErrPasswordMissing{}
 	}
 
-	return nil
+	return signInInput, nil
 }

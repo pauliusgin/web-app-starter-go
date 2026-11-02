@@ -273,7 +273,7 @@ func TestRequireAuthenticatedUserRejectsRequestsWithoutAUsableBearerToken(t *tes
 			omitHeader:      true,
 			wantChallenge:   tokenRequiredChallenge,
 			wantCode:        handlers.ErrorCodeAccessTokenMissing,
-			wantLoggedError: ErrAuthorizationHeaderAbsent{},
+			wantLoggedError: ErrAuthorizationHeaderMissing{},
 		},
 		{
 			name:            "wrong scheme",
@@ -469,7 +469,7 @@ func TestRequireAuthenticatedUserAnswersInternalServerErrorWhenTheLookupFails(t 
 
 	authenticated := authenticatedUserFixture()
 	leakedDetail := "dial tcp 127.0.0.1:5432: connect: connection refused"
-	lookupFailure := usererrors.ErrIDLookupFailed{Cause: errors.New(leakedDetail)}
+	lookupFailure := usererrors.ErrFindUserFailed{Cause: errors.New(leakedDetail)}
 
 	recorder, next := sendGuardedRequest(t, sendGuardedRequestParams{
 		parser:        &recordingAccessTokenParser{claims: claimsFor(authenticated)},

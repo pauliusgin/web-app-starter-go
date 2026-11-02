@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// DeleteUserRefreshTokensDependencies carries the collaborator deleting a user's tokens needs.
+// DeleteUserRefreshTokensDependencies carries the refresh token store the user's tokens are deleted from.
 type DeleteUserRefreshTokensDependencies struct {
 	WriteRepository WriteRepository
 }

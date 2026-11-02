@@ -1,3 +1,4 @@
+// Package profiles holds the HTTP handlers for creating and updating the caller's profile.
 package profiles
 
 import (
@@ -11,7 +12,9 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/input"
 	profileerrors "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 )
 
 type createProfileRequest struct {
@@ -28,9 +31,10 @@ type createProfileResponse struct {
 // CreateProfileUseCase is the domain call the profile creation handler depends on.
 type CreateProfileUseCase func(ctx context.Context, params usecases.CreateProfileParams) (usecases.CreateProfileResult, error)
 
-// CreateProfileDependencies carries the collaborator the profile creation handler orchestrates.
+// CreateProfileDependencies carries the use case recording the profile and the query re-reading it.
 type CreateProfileDependencies struct {
-	CreateProfile CreateProfileUseCase
+	CreateProfile  CreateProfileUseCase
+	GetProfileByID GetProfileByIDUseCase
 }
 
 // CreateProfile returns a handler recording the authenticated user's profile.
@@ -51,7 +55,7 @@ func CreateProfile(d CreateProfileDependencies) http.HandlerFunc {
 			return
 		}
 
-		profileInput, err := validateProfileNames(input.ProfileInput{
+		profileInput, err := input.ValidateProfileInput(input.ProfileInput{
 			FirstName: request.FirstName,
 			LastName:  request.LastName,
 		})
@@ -70,11 +74,21 @@ func CreateProfile(d CreateProfileDependencies) http.HandlerFunc {
 			return
 		}
 
-		handlers.WriteJSON(w, http.StatusCreated, createProfileResponse{
-			ID:        result.Profile.ID,
-			FirstName: result.Profile.FirstName,
-			LastName:  result.Profile.LastName,
-		})
+		readResult, err := d.GetProfileByID(r.Context(), queries.GetProfileByIDParams{UserID: result.Profile.ID})
+		if err != nil {
+			writeCreateProfileFailure(w, err)
+			return
+		}
+
+		handlers.WriteJSON(w, http.StatusCreated, buildCreateProfileResponse(readResult.Profile))
+	}
+}
+
+func buildCreateProfileResponse(profile models.ProfileReadModel) createProfileResponse {
+	return createProfileResponse{
+		ID:        profile.ID,
+		FirstName: profile.FirstName,
+		LastName:  profile.LastName,
 	}
 }
 

@@ -6,21 +6,20 @@ import (
 	"net/http"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
-	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/tokens"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
 	messaging "github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/usecases"
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	users "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
 
 // VerifyEmailUseCase is the domain call the verification handler depends on.
 type VerifyEmailUseCase func(
 	ctx context.Context,
-	params users.VerifyEmailParams,
+	params usecases.VerifyEmailParams,
 ) error
 
-// VerifyEmailDependencies carries the collaborator the verification handler orchestrates.
+// VerifyEmailDependencies carries the use case redeeming the verification link for the caller.
 type VerifyEmailDependencies struct {
 	VerifyEmail VerifyEmailUseCase
 }
@@ -40,11 +39,11 @@ func VerifyEmail(d VerifyEmailDependencies) http.HandlerFunc {
 
 		verificationToken := r.URL.Query().Get(messaging.VerificationTokenQueryParam)
 		if verificationToken == "" {
-			writeVerifyEmailFailure(w, tokens.ErrVerificationTokenAbsent{})
+			writeVerifyEmailFailure(w, ErrVerificationTokenMissing{})
 			return
 		}
 
-		if err := d.VerifyEmail(r.Context(), users.VerifyEmailParams{
+		if err := d.VerifyEmail(r.Context(), usecases.VerifyEmailParams{
 			VerificationToken: verificationToken,
 			UserID:            userID,
 		}); err != nil {
@@ -57,10 +56,10 @@ func VerifyEmail(d VerifyEmailDependencies) http.HandlerFunc {
 }
 
 var verifyEmailRules = []handlers.RejectionRule{
-	handlers.RejectWhen[tokens.ErrVerificationTokenAbsent](handlers.Rejection{
+	handlers.RejectWhen[ErrVerificationTokenMissing](handlers.Rejection{
 		Status:  http.StatusBadRequest,
 		Code:    handlers.ErrorCodeVerificationTokenMissing,
-		Message: tokens.VerificationTokenRequiredText,
+		Message: verificationTokenRequiredText,
 	}),
 	handlers.RejectWhen[usererrors.ErrVerificationLinkInvalid](handlers.Rejection{
 		Status:  http.StatusBadRequest,

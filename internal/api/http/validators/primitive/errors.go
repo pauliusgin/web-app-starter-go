@@ -4,12 +4,12 @@ import "fmt"
 
 const emailExpectationText = "expected a plain address such as accountant@example.com, without a display name"
 
-// ErrInvalidEmail reports an email that is not a plain address.
-type ErrInvalidEmail struct {
+// ErrEmailInvalid reports an email that is not a plain address.
+type ErrEmailInvalid struct {
 	Email string
 }
 
-func (e ErrInvalidEmail) Error() string {
+func (e ErrEmailInvalid) Error() string {
 	return fmt.Sprintf("invalid email %q: %s", e.Email, emailExpectationText)
 }
 

@@ -60,9 +60,9 @@ func TestReadPortVariableRejectsPortOutOfRange(t *testing.T) {
 
 	_, err := readPortVariable(readIntVariableParams{Variable: testPortVariable, Fallback: 8080})
 
-	invalidPort := ErrInvalidPort{}
+	invalidPort := ErrPortInvalid{}
 	if !errors.As(err, &invalidPort) {
-		t.Fatalf("error = %v, want ErrInvalidPort", err)
+		t.Fatalf("error = %v, want ErrPortInvalid", err)
 	}
 	if invalidPort.Variable != testPortVariable {
 		t.Errorf("Variable = %q, want %q", invalidPort.Variable, testPortVariable)

@@ -52,7 +52,7 @@ func TestValidateProfileInput(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := ValidateProfileInput(testCase.input)
+			_, err := ValidateProfileInput(testCase.input)
 
 			if !testCase.wantErr {
 				if err != nil {
@@ -65,5 +65,17 @@ func TestValidateProfileInput(t *testing.T) {
 				t.Fatalf("error = %v, want %T", err, testCase.wantErrTarget)
 			}
 		})
+	}
+}
+
+func TestValidateProfileInputReturnsTrimmedNames(t *testing.T) {
+	profileInput, err := ValidateProfileInput(ProfileInput{FirstName: "  Ada\t", LastName: " Lovelace "})
+	if err != nil {
+		t.Fatalf("ValidateProfileInput: %v", err)
+	}
+
+	want := ProfileInput{FirstName: "Ada", LastName: "Lovelace"}
+	if profileInput != want {
+		t.Errorf("profile input = %+v, want %+v", profileInput, want)
 	}
 }

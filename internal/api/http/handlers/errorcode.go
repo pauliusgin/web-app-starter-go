@@ -46,10 +46,6 @@ const (
 	ErrorCodeVerificationLinkInvalid ErrorCode = "verification_link_invalid"
 	// ErrorCodeVerificationLinkNotOwned answers a verification link issued to a different account.
 	ErrorCodeVerificationLinkNotOwned ErrorCode = "verification_link_not_owned"
-	// ErrorCodeUserIDMalformed answers a path user id that is not a valid uuid.
-	ErrorCodeUserIDMalformed ErrorCode = "user_id_malformed"
-	// ErrorCodeUserDeletionForbidden answers an attempt to delete an account other than the caller's own.
-	ErrorCodeUserDeletionForbidden ErrorCode = "user_deletion_forbidden"
 	// ErrorCodeUserNotFound answers a request naming a user that does not exist.
 	ErrorCodeUserNotFound ErrorCode = "user_not_found"
 	// ErrorCodeUploadPurposeInvalid answers an upload whose purpose is missing or unknown.

@@ -12,8 +12,8 @@ const UserSignedInLabel Label = "user.signed_in"
 // UserDeletedLabel labels the event dispatched when an account is soft-deleted.
 const UserDeletedLabel Label = "user.deleted"
 
-// EmailVerifiedLabel labels the event dispatched when an account's email is verified.
-const EmailVerifiedLabel Label = "user.email_verified"
+// UserEmailVerifiedLabel labels the event dispatched when an account's email is verified.
+const UserEmailVerifiedLabel Label = "user.email_verified"
 
 // UserEmailChangedLabel labels the event dispatched when an account switches to a newly verified email.
 const UserEmailChangedLabel Label = "user.email_changed"

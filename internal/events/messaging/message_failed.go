@@ -16,8 +16,8 @@ type messageFailedData struct {
 	Errors         []string  `json:"errors"`
 }
 
-// MessageFailedParams is the logged message a message.failed event carries.
-type MessageFailedParams struct {
+// NewMessageFailedParams is the logged message a message.failed event carries.
+type NewMessageFailedParams struct {
 	MessageID      uuid.UUID
 	RecipientID    uuid.UUID
 	RecipientEmail string
@@ -26,8 +26,8 @@ type MessageFailedParams struct {
 	Errors         []string
 }
 
-// MessageFailed builds the event announcing a message the delivery provider did not accept.
-func MessageFailed(params MessageFailedParams) (events.NewEvent, error) {
+// NewMessageFailed builds the event announcing a message the delivery provider did not accept.
+func NewMessageFailed(params NewMessageFailedParams) (events.NewEvent, error) {
 	return events.New(events.NewEventParams{
 		Label:  events.MessageFailedLabel,
 		UserID: uuid.NullUUID{UUID: params.RecipientID, Valid: true},
@@ -43,8 +43,8 @@ func MessageFailed(params MessageFailedParams) (events.NewEvent, error) {
 }
 
 // DispatchMessageFailed builds, records and publishes the event announcing a failed message.
-func DispatchMessageFailed(ctx context.Context, dispatcher events.Dispatcher, params MessageFailedParams) {
+func DispatchMessageFailed(ctx context.Context, dispatcher events.Dispatcher, params NewMessageFailedParams) {
 	dispatcher.Dispatch(ctx, func() (events.NewEvent, error) {
-		return MessageFailed(params)
+		return NewMessageFailed(params)
 	})
 }

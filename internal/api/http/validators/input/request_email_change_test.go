@@ -11,34 +11,44 @@ func TestValidateRequestEmailChangeInput(t *testing.T) {
 	cases := []struct {
 		name          string
 		input         RequestEmailChangeInput
+		want          RequestEmailChangeInput
 		wantErr       bool
 		wantErrTarget any
 	}{
 		{
 			name:  "valid email",
 			input: RequestEmailChangeInput{NewEmail: testEmail},
+			want:  RequestEmailChangeInput{NewEmail: testEmail},
+		},
+		{
+			name:  "email is trimmed and lowercased",
+			input: RequestEmailChangeInput{NewEmail: " Accountant@Example.COM "},
+			want:  RequestEmailChangeInput{NewEmail: testEmail},
 		},
 		{
 			name:          "invalid email",
 			input:         RequestEmailChangeInput{NewEmail: "bob"},
 			wantErr:       true,
-			wantErrTarget: &primitive.ErrInvalidEmail{},
+			wantErrTarget: &primitive.ErrEmailInvalid{},
 		},
 		{
 			name:          "missing email",
 			input:         RequestEmailChangeInput{},
 			wantErr:       true,
-			wantErrTarget: &primitive.ErrInvalidEmail{},
+			wantErrTarget: &primitive.ErrEmailInvalid{},
 		},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := ValidateRequestEmailChangeInput(testCase.input)
+			got, err := ValidateRequestEmailChangeInput(testCase.input)
 
 			if !testCase.wantErr {
 				if err != nil {
 					t.Fatalf("ValidateRequestEmailChangeInput: %v", err)
+				}
+				if got != testCase.want {
+					t.Fatalf("ValidateRequestEmailChangeInput = %+v, want %+v", got, testCase.want)
 				}
 				return
 			}

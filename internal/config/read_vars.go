@@ -38,7 +38,7 @@ func readPortVariable(params readIntVariableParams) (int, error) {
 	}
 
 	if port < minimumPort || port > maximumPort {
-		return 0, ErrInvalidPort{Variable: params.Variable, RawValue: os.Getenv(params.Variable)}
+		return 0, ErrPortInvalid{Variable: params.Variable, RawValue: os.Getenv(params.Variable)}
 	}
 
 	return port, nil

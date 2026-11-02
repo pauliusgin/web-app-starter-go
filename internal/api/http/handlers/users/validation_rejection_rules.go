@@ -8,7 +8,7 @@ import (
 )
 
 var emailValidationRules = []handlers.RejectionRule{
-	handlers.RejectWhen[primitive.ErrInvalidEmail](
+	handlers.RejectWhen[primitive.ErrEmailInvalid](
 		handlers.Rejection{Status: http.StatusBadRequest, Code: handlers.ErrorCodeEmailInvalid}),
 }
 

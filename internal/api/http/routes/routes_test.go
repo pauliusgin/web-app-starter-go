@@ -18,11 +18,15 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	jwt "github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
-	profilemodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/models"
-	profileusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/usecases"
-	uploadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/models"
-	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/usecases"
+	profilereadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
+	profilequeries "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
+	profilemodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/models"
+	profileusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
+	uploadqueries "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/queries"
+	uploadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
+	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
 	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
+	userqueries "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/queries"
 	models "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
@@ -42,9 +46,11 @@ const changePasswordPath = "/api/v1/users/change-password"
 
 const changePasswordBody = `{"currentPassword":"correct-horse","newPassword":"new-ledger-password"}`
 
-var deleteUserPath = "/api/v1/users/" + routedUserID.String()
+const currentUserPath = "/api/v1/users/me"
 
 const bearerCredential = "Bearer header.payload.signature"
+
+const presentedRefreshToken = "Zx7cV2bN5mQ8wE1rT4yU7iO0pA3sD6fG9hJ2kL5zX8c"
 
 const uploadFilesPath = "/api/v1/uploads"
 
@@ -70,6 +76,7 @@ type routeRequest struct {
 	body          string
 	contentType   string
 	authorization string
+	refreshToken  string
 }
 
 func serveRouteRequest(router http.Handler, routed routeRequest) *httptest.ResponseRecorder {
@@ -82,6 +89,9 @@ func serveRouteRequest(router http.Handler, routed routeRequest) *httptest.Respo
 	request.Header.Set("Content-Type", contentType)
 	if routed.authorization != "" {
 		request.Header.Set("Authorization", routed.authorization)
+	}
+	if routed.refreshToken != "" {
+		request.AddCookie(&http.Cookie{Name: tokens.RefreshTokenCookieName, Value: routed.refreshToken})
 	}
 
 	router.ServeHTTP(recorder, request)
@@ -111,32 +121,48 @@ func findRoutedUserByID(_ context.Context, id uuid.UUID) (models.User, error) {
 	return models.User{ID: id, Email: "accountant@example.com"}, nil
 }
 
+func getRoutedUserReadModel(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
+	return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
+}
+
+func getRoutedProfile(
+	_ context.Context,
+	params profilequeries.GetProfileByIDParams,
+) (profilequeries.GetProfileByIDResult, error) {
+	return profilequeries.GetProfileByIDResult{Profile: profilereadmodels.ProfileReadModel{ID: params.UserID}}, nil
+}
+
 func routerWithEveryRouteWired() http.Handler {
 	return BuildRouter(RouterDependencies{
-		Users: UserRouterDependencies{
-			SignUp: users.SignUpUserDependencies{
-				SignupUser: func(_ context.Context, params usecases.SignupUserParams) (usecases.SignupUserResult, error) {
-					return usecases.SignupUserResult{User: models.User{ID: routedUserID, Email: params.Email}}, nil
+		Users: UserRoutesDependencies{
+			SignUpUser: users.SignUpUserDependencies{
+				SignUpUser: func(_ context.Context, params usecases.SignUpUserParams) (usecases.SignUpUserResult, error) {
+					return usecases.SignUpUserResult{User: models.User{ID: routedUserID, Email: params.Email}}, nil
 				},
-				IssueRefreshToken: func(context.Context, refreshtoken.IssuingParams) (refreshtoken.Issued, error) {
-					return refreshtoken.Issued{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
+				GetUserReadModelByID: getRoutedUserReadModel,
+				IssueRefreshToken: func(context.Context, refreshtoken.IssueParams) (refreshtoken.IssueResult, error) {
+					return refreshtoken.IssueResult{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
 				},
 				Jwt: fakeAccessTokens{},
 			},
-			SignIn: users.SignInUserDependencies{
+			SignInUser: users.SignInUserDependencies{
 				SignInUser: func(_ context.Context, params usecases.SignInUserParams) (usecases.SignInUserResult, error) {
 					return usecases.SignInUserResult{User: models.User{ID: routedUserID, Email: params.Email}}, nil
 				},
-				FindUserReadModelByID: func(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
-					return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
-				},
-				IssueRefreshToken: func(context.Context, refreshtoken.IssuingParams) (refreshtoken.Issued, error) {
-					return refreshtoken.Issued{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
+				GetUserReadModelByID: getRoutedUserReadModel,
+				IssueRefreshToken: func(context.Context, refreshtoken.IssueParams) (refreshtoken.IssueResult, error) {
+					return refreshtoken.IssueResult{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
 				},
 				Jwt: fakeAccessTokens{},
 			},
 			VerifyEmail: users.VerifyEmailDependencies{
 				VerifyEmail: func(context.Context, usecases.VerifyEmailParams) error { return nil },
+			},
+			GetUserByID: users.GetUserByIDDependencies{
+				GetUserByID: func(_ context.Context, params userqueries.GetUserByIDParams) (userqueries.GetUserByIDResult, error) {
+					user, err := getRoutedUserReadModel(context.Background(), params.UserID)
+					return userqueries.GetUserByIDResult{User: user}, err
+				},
 			},
 			DeleteUser: users.DeleteUserDependencies{
 				DeleteUser: func(context.Context, usecases.DeleteUserParams) error { return nil },
@@ -152,10 +178,10 @@ func routerWithEveryRouteWired() http.Handler {
 				FindUserByID:     findRoutedUserByID,
 			},
 		},
-		Auth: AuthRouterDependencies{
-			RotateRefreshToken: tokens.RotateDependencies{
-				RotateRefreshToken: func(context.Context, refreshtoken.RotateParams) (refreshtoken.Rotated, error) {
-					return refreshtoken.Rotated{UserID: routedUserID, Plaintext: "rotated-refresh-token"}, nil
+		Auth: TokenRoutesDependencies{
+			RotateRefreshToken: tokens.RotateRefreshTokenDependencies{
+				RotateRefreshToken: func(context.Context, refreshtoken.RotateParams) (refreshtoken.RotateResult, error) {
+					return refreshtoken.RotateResult{UserID: routedUserID, Plaintext: "rotated-refresh-token"}, nil
 				},
 				FindUserByID: findRoutedUserByID,
 				Jwt:          fakeAccessTokens{},
@@ -164,10 +190,13 @@ func routerWithEveryRouteWired() http.Handler {
 				RevokeRefreshToken: func(context.Context, refreshtoken.RevokeParams) error { return nil },
 			},
 		},
-		Uploads: UploadRouterDependencies{
+		Uploads: UploadRoutesDependencies{
 			UploadFiles: uploads.UploadFilesDependencies{
 				UploadFiles: func(context.Context, uploadusecases.UploadFilesParams) (uploadusecases.UploadFilesResult, error) {
 					return uploadusecases.UploadFilesResult{Uploads: []uploadmodels.Upload{{ID: routedUserID}}}, nil
+				},
+				GetUploadsByIDs: func(context.Context, uploadqueries.GetUploadsByIDsParams) (uploadqueries.GetUploadsByIDsResult, error) {
+					return uploadqueries.GetUploadsByIDsResult{}, nil
 				},
 			},
 			RequireAuthenticatedUser: middleware.RequireAuthenticatedUserDependencies{
@@ -175,16 +204,18 @@ func routerWithEveryRouteWired() http.Handler {
 				FindUserByID:     findRoutedUserByID,
 			},
 		},
-		Profiles: ProfileRouterDependencies{
+		Profiles: ProfileRoutesDependencies{
 			CreateProfile: profiles.CreateProfileDependencies{
 				CreateProfile: func(context.Context, profileusecases.CreateProfileParams) (profileusecases.CreateProfileResult, error) {
 					return profileusecases.CreateProfileResult{Profile: profilemodels.Profile{ID: routedUserID}}, nil
 				},
+				GetProfileByID: getRoutedProfile,
 			},
 			UpdateProfile: profiles.UpdateProfileDependencies{
 				UpdateProfile: func(context.Context, profileusecases.UpdateProfileParams) (profileusecases.UpdateProfileResult, error) {
 					return profileusecases.UpdateProfileResult{Profile: profilemodels.Profile{ID: routedUserID}}, nil
 				},
+				GetProfileByID: getRoutedProfile,
 			},
 			RequireAuthenticatedUser: middleware.RequireAuthenticatedUserDependencies{
 				ParseAccessToken: fakeAccessTokens{}.ParseAccessToken,
@@ -194,13 +225,20 @@ func routerWithEveryRouteWired() http.Handler {
 	})
 }
 
+func TestRefreshTokenCookiePathMatchesTheTokenRoutes(t *testing.T) {
+	if tokens.RefreshTokenCookiePath != TokenRoutePath {
+		t.Errorf("tokens.RefreshTokenCookiePath = %q, want TokenRoutePath %q so the browser sends the cookie to the token routes",
+			tokens.RefreshTokenCookiePath, TokenRoutePath)
+	}
+}
+
 func TestBuildRouterReachesEveryRoute(t *testing.T) {
 	cases := []struct {
 		name       string
 		request    routeRequest
 		wantStatus int
 	}{
-		{name: "health", request: routeRequest{method: http.MethodGet, path: HealthPath},
+		{name: "health", request: routeRequest{method: http.MethodGet, path: HealthRoutePath},
 			wantStatus: http.StatusOK},
 		{name: "signup", request: routeRequest{method: http.MethodPost, path: signupPath, body: signupBody},
 			wantStatus: http.StatusCreated},
@@ -208,16 +246,18 @@ func TestBuildRouterReachesEveryRoute(t *testing.T) {
 			wantStatus: http.StatusOK},
 		{name: "verify email", request: routeRequest{method: http.MethodPost, path: verifyEmailPath,
 			authorization: bearerCredential}, wantStatus: http.StatusOK},
-		{name: "delete user", request: routeRequest{method: http.MethodDelete, path: deleteUserPath,
+		{name: "get current user", request: routeRequest{method: http.MethodGet, path: currentUserPath,
+			authorization: bearerCredential}, wantStatus: http.StatusOK},
+		{name: "delete user", request: routeRequest{method: http.MethodDelete, path: currentUserPath,
 			authorization: bearerCredential}, wantStatus: http.StatusOK},
 		{name: "request email change", request: routeRequest{method: http.MethodPost, path: requestEmailChangePath,
 			body: requestEmailChangeBody, authorization: bearerCredential}, wantStatus: http.StatusAccepted},
 		{name: "change password", request: routeRequest{method: http.MethodPost, path: changePasswordPath,
 			body: changePasswordBody, authorization: bearerCredential}, wantStatus: http.StatusOK},
 		{name: "token refresh", request: routeRequest{method: http.MethodPost, path: refreshTokenPath,
-			authorization: bearerCredential}, wantStatus: http.StatusOK},
+			refreshToken: presentedRefreshToken}, wantStatus: http.StatusOK},
 		{name: "token revoke", request: routeRequest{method: http.MethodPost, path: revokeTokenPath,
-			authorization: bearerCredential}, wantStatus: http.StatusOK},
+			refreshToken: presentedRefreshToken}, wantStatus: http.StatusOK},
 		{name: "upload files", request: routeRequest{method: http.MethodPost, path: uploadFilesPath,
 			body: uploadFilesBody, contentType: uploadContentType, authorization: bearerCredential},
 			wantStatus: http.StatusCreated},
@@ -249,7 +289,7 @@ func TestBuildRouterRejectsUnroutedRequests(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "unknown path", method: http.MethodGet, path: "/api/nope", wantStatus: http.StatusNotFound},
-		{name: "health rejects POST", method: http.MethodPost, path: HealthPath,
+		{name: "health rejects POST", method: http.MethodPost, path: HealthRoutePath,
 			wantStatus: http.StatusMethodNotAllowed},
 		{name: "signup rejects GET", method: http.MethodGet, path: signupPath,
 			wantStatus: http.StatusMethodNotAllowed},
@@ -257,7 +297,7 @@ func TestBuildRouterRejectsUnroutedRequests(t *testing.T) {
 			wantStatus: http.StatusMethodNotAllowed},
 		{name: "verify email rejects GET", method: http.MethodGet, path: verifyEmailPath,
 			wantStatus: http.StatusMethodNotAllowed},
-		{name: "user rejects GET", method: http.MethodGet, path: deleteUserPath,
+		{name: "current user rejects POST", method: http.MethodPost, path: currentUserPath,
 			wantStatus: http.StatusMethodNotAllowed},
 		{name: "request email change rejects GET", method: http.MethodGet, path: requestEmailChangePath,
 			wantStatus: http.StatusMethodNotAllowed},
@@ -302,12 +342,12 @@ func TestBuildRouterRequiresAuthOnlyWhereDeclared(t *testing.T) {
 		request      routeRequest
 		requiresAuth bool
 	}{
-		{name: "health", request: routeRequest{method: http.MethodGet, path: HealthPath}},
+		{name: "health", request: routeRequest{method: http.MethodGet, path: HealthRoutePath}},
 		{name: "signup", request: routeRequest{method: http.MethodPost, path: signupPath, body: signupBody}},
 		{name: "signin", request: routeRequest{method: http.MethodPost, path: signinPath, body: signupBody}},
 		{name: "verify email", request: routeRequest{method: http.MethodPost, path: verifyEmailPath},
 			requiresAuth: true},
-		{name: "delete user", request: routeRequest{method: http.MethodDelete, path: deleteUserPath},
+		{name: "delete user", request: routeRequest{method: http.MethodDelete, path: currentUserPath},
 			requiresAuth: true},
 		{name: "request email change", request: routeRequest{method: http.MethodPost, path: requestEmailChangePath,
 			body: requestEmailChangeBody}, requiresAuth: true},

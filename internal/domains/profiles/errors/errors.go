@@ -11,6 +11,7 @@ const profileAlreadyExistsText = "profile already exists"
 const profileNotFoundText = "profile not found"
 const saveProfileFailedText = "failed saving the profile"
 const updateProfileFailedText = "failed updating the profile"
+const findProfileFailedText = "failed finding the profile"
 
 // ErrProfileAlreadyExists reports a profile creation for a user who already has one.
 type ErrProfileAlreadyExists struct {
@@ -21,7 +22,7 @@ func (e ErrProfileAlreadyExists) Error() string {
 	return fmt.Sprintf("%s for user %s", profileAlreadyExistsText, e.UserID)
 }
 
-// ErrProfileNotFound reports a profile change for a user who has no profile.
+// ErrProfileNotFound reports a profile lookup or change for a user who has no live profile.
 type ErrProfileNotFound struct {
 	UserID uuid.UUID
 }
@@ -55,5 +56,19 @@ func (e ErrUpdateProfileFailed) Error() string {
 }
 
 func (e ErrUpdateProfileFailed) Unwrap() error {
+	return e.Cause
+}
+
+// ErrFindProfileFailed reports a profile lookup the database could not complete.
+type ErrFindProfileFailed struct {
+	UserID uuid.UUID
+	Cause  error
+}
+
+func (e ErrFindProfileFailed) Error() string {
+	return fmt.Sprintf("%s for user %s: %s", findProfileFailedText, e.UserID, e.Cause)
+}
+
+func (e ErrFindProfileFailed) Unwrap() error {
 	return e.Cause
 }

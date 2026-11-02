@@ -2,7 +2,9 @@ package users
 
 import "fmt"
 
-const unexpectedSignupFailureText = "could not create the user"
+const unexpectedSignUpFailureText = "could not create the user"
+
+const verificationTokenRequiredText = "a verification token is required"
 
 const invalidVerificationLinkText = "this verification link is not valid or has expired"
 
@@ -22,22 +24,13 @@ const unexpectedDeletionFailureText = "could not delete the user"
 
 const deletionRejectedText = "rejected a user deletion"
 
-const userIDMalformedText = "the user id in the path is not a valid uuid"
+const unexpectedUserLookupFailureText = "could not load the user"
 
-const deletionNotYoursText = "you can only delete your own account"
+const userNotFoundText = "user not found"
 
-const deletedUserNotFoundText = "user not found"
+// ErrVerificationTokenMissing reports a verify request that carried no token query parameter.
+type ErrVerificationTokenMissing struct{}
 
-// ErrUserIDMalformed reports a path user id that does not parse as a uuid.
-type ErrUserIDMalformed struct {
-	RawUserID string
-	Cause     error
-}
-
-func (e ErrUserIDMalformed) Error() string {
-	return fmt.Sprintf("user id %q: %s: %s", e.RawUserID, userIDMalformedText, e.Cause)
-}
-
-func (e ErrUserIDMalformed) Unwrap() error {
-	return e.Cause
+func (e ErrVerificationTokenMissing) Error() string {
+	return fmt.Sprintf("missing verification token: %s", verificationTokenRequiredText)
 }

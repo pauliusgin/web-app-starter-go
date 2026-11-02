@@ -14,7 +14,9 @@ const Lifetime = 5 * time.Minute
 type TargetType string
 
 const (
+	// TargetTypeEmail sends the challenge to an email address.
 	TargetTypeEmail TargetType = "email"
+	// TargetTypePhone sends the challenge to a phone number.
 	TargetTypePhone TargetType = "phone"
 )
 
@@ -22,9 +24,12 @@ const (
 type Purpose string
 
 const (
+	// PurposeEmailVerification proves the user owns the email address on the account.
 	PurposeEmailVerification Purpose = "email_verification"
+	// PurposePhoneVerification proves the user owns the phone number on the account.
 	PurposePhoneVerification Purpose = "phone_verification"
-	PasswordReset            Purpose = "password_reset"
+	// PurposePasswordReset lets the user set a new password without the current one.
+	PurposePasswordReset Purpose = "password_reset"
 )
 
 // Challenge is a stored challenge as callers see it, carrying the hash and never the secret.

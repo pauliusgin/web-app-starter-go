@@ -17,14 +17,14 @@ func TestIssueRefreshTokenStoresTheHashAndReturnsThePlaintext(t *testing.T) {
 
 	issuedAfter := time.Now()
 	issued, err := Issue(context.Background(),
-		IssuingDependencies{WriteRepository: store},
-		IssuingParams{UserID: userID})
+		IssueDependencies{WriteRepository: store},
+		IssueParams{UserID: userID})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
 	issuedBefore := time.Now()
 
-	storedTokens := store.tokensForUser(userID)
+	storedTokens := tokensForUser(store, userID)
 	if len(storedTokens) != 1 {
 		t.Fatalf("stored rows = %d, want 1", len(storedTokens))
 	}
@@ -62,11 +62,11 @@ func TestIssueRefreshTokenStoresTheHashAndReturnsThePlaintext(t *testing.T) {
 func TestIssueRefreshTokenSurfacesAStorageFailure(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
-	store.saveFailure = ErrSaveRefreshTokenFailed{Cause: cause}
+	store.SaveFailure = ErrSaveRefreshTokenFailed{Cause: cause}
 
 	issued, err := Issue(context.Background(),
-		IssuingDependencies{WriteRepository: store},
-		IssuingParams{UserID: uuid.New()})
+		IssueDependencies{WriteRepository: store},
+		IssueParams{UserID: uuid.New()})
 
 	if !errors.As(err, &ErrSaveRefreshTokenFailed{}) {
 		t.Fatalf("error = %v, want ErrSaveRefreshTokenFailed", err)
@@ -74,10 +74,10 @@ func TestIssueRefreshTokenSurfacesAStorageFailure(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Error("the storage failure does not unwrap to the driver error")
 	}
-	if issued != (Issued{}) {
+	if issued != (IssueResult{}) {
 		t.Errorf("token = %+v, want the zero value on failure", issued)
 	}
-	if len(store.rows) != 0 {
-		t.Errorf("stored rows = %d, want nothing stored when the insert fails", len(store.rows))
+	if len(store.Tokens) != 0 {
+		t.Errorf("stored rows = %d, want nothing stored when the insert fails", len(store.Tokens))
 	}
 }

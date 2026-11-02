@@ -40,7 +40,7 @@ var secondRulesForTest = []RejectionRule{
 	RejectWhen[errFirstRuleForTest](Rejection{Status: http.StatusTeapot, Code: ErrorCodeInternal}),
 	RejectWhen[errSecondRuleForTest](Rejection{
 		Status:  http.StatusForbidden,
-		Code:    ErrorCodeUserDeletionForbidden,
+		Code:    ErrorCodeVerificationLinkNotOwned,
 		Message: fixedMessageForTest,
 	}),
 }

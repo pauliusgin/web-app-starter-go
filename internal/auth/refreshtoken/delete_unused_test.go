@@ -49,16 +49,16 @@ func TestDeleteUnusedRefreshTokensDeletesOnlyTokensPastTheThreshold(t *testing.T
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			store := newInMemoryTokenStore()
-			plaintext := store.seedToken(t, testCase.params)
+			plaintext := seedToken(t, store, testCase.params)
 
 			deletedCount, err := DeleteUnusedRefreshTokens(context.Background(),
-				UnusedDeletionDependencies{WriteRepository: store},
-				UnusedDeletionParams{CleanUpThreshold: cleanUpThresholdInDays})
+				DeleteUnusedRefreshTokensDependencies{WriteRepository: store},
+				DeleteUnusedRefreshTokensParams{CleanUpThresholdInDays: cleanUpThresholdInDays})
 			if err != nil {
 				t.Fatalf("DeleteUnusedRefreshTokens: %v", err)
 			}
 
-			_, stillStored := store.rows[token.Hash(plaintext)]
+			_, stillStored := store.Tokens[token.Hash(plaintext)]
 			if stillStored == testCase.wantDeleted {
 				t.Errorf("row still stored = %t, want deleted = %t", stillStored, testCase.wantDeleted)
 			}
@@ -76,16 +76,16 @@ func TestDeleteUnusedRefreshTokensCountsEveryRowItRemoved(t *testing.T) {
 	store := newInMemoryTokenStore()
 	userID := uuid.New()
 
-	store.seedToken(t, seedTokenParams{UserID: userID, ExpiresAt: fixedRotatedAt.Add(-time.Hour)})
-	store.seedToken(t, seedTokenParams{
+	seedToken(t, store, seedTokenParams{UserID: userID, ExpiresAt: fixedRotatedAt.Add(-time.Hour)})
+	seedToken(t, store, seedTokenParams{
 		UserID:    userID,
 		RevokedAt: fixedRotatedAt.Add(-30 * 24 * time.Hour),
 	})
-	store.seedToken(t, seedTokenParams{UserID: userID})
+	seedToken(t, store, seedTokenParams{UserID: userID})
 
 	deletedCount, err := DeleteUnusedRefreshTokens(context.Background(),
-		UnusedDeletionDependencies{WriteRepository: store},
-		UnusedDeletionParams{CleanUpThreshold: cleanUpThresholdInDays})
+		DeleteUnusedRefreshTokensDependencies{WriteRepository: store},
+		DeleteUnusedRefreshTokensParams{CleanUpThresholdInDays: cleanUpThresholdInDays})
 	if err != nil {
 		t.Fatalf("DeleteUnusedRefreshTokens: %v", err)
 	}
@@ -93,19 +93,19 @@ func TestDeleteUnusedRefreshTokensCountsEveryRowItRemoved(t *testing.T) {
 	if deletedCount != 2 {
 		t.Errorf("deleted count = %d, want 2", deletedCount)
 	}
-	if len(store.tokensForUser(userID)) != 1 {
-		t.Errorf("rows left = %d, want the one live row", len(store.tokensForUser(userID)))
+	if len(tokensForUser(store, userID)) != 1 {
+		t.Errorf("rows left = %d, want the one live row", len(tokensForUser(store, userID)))
 	}
 }
 
 func TestDeleteUnusedRefreshTokensSurfacesADeleteFailureUnchanged(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
-	store.deleteUnusedFailure = ErrDeleteUnusedRefreshTokensFailed{Cause: cause}
+	store.DeleteUnusedFailure = ErrDeleteUnusedRefreshTokensFailed{Cause: cause}
 
 	deletedCount, err := DeleteUnusedRefreshTokens(context.Background(),
-		UnusedDeletionDependencies{WriteRepository: store},
-		UnusedDeletionParams{CleanUpThreshold: cleanUpThresholdInDays})
+		DeleteUnusedRefreshTokensDependencies{WriteRepository: store},
+		DeleteUnusedRefreshTokensParams{CleanUpThresholdInDays: cleanUpThresholdInDays})
 
 	deleteFailed := ErrDeleteUnusedRefreshTokensFailed{}
 	if !errors.As(err, &deleteFailed) {

@@ -28,13 +28,9 @@ func NewUserWriteRepository(queries *sqlc.Queries) UserWriteRepository {
 	return UserWriteRepository{queries: queries}
 }
 
-// Save inserts the user and returns the row the database produced.
-func (r UserWriteRepository) Save(ctx context.Context, newUser models.NewUser) (models.User, error) {
-	row, err := r.queries.CreateUser(ctx, sqlc.CreateUserParams{
-		ID:           newUser.ID,
-		Email:        newUser.Email,
-		PasswordHash: newUser.PasswordHash,
-	})
+// SaveUser inserts the user and returns the row the database produced.
+func (r UserWriteRepository) SaveUser(ctx context.Context, newUser models.NewUser) (models.User, error) {
+	row, err := r.queries.CreateUser(ctx, mappers.CreateUserParamsMapper(newUser))
 	if err != nil {
 		return models.User{}, usererrors.ErrSaveUserFailed{Cause: err}
 	}
@@ -46,10 +42,10 @@ func (r UserWriteRepository) Save(ctx context.Context, newUser models.NewUser) (
 func (r UserWriteRepository) FindUserByID(ctx context.Context, id uuid.UUID) (models.User, error) {
 	row, err := r.queries.FindUserByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.User{}, usererrors.ErrUserNotFound{}
+		return models.User{}, usererrors.ErrUserNotFound{ID: id}
 	}
 	if err != nil {
-		return models.User{}, usererrors.ErrIDLookupFailed{Cause: err}
+		return models.User{}, usererrors.ErrFindUserFailed{ID: id, Cause: err}
 	}
 
 	return mappers.UserFromIDMapper(row), nil
@@ -59,10 +55,10 @@ func (r UserWriteRepository) FindUserByID(ctx context.Context, id uuid.UUID) (mo
 func (r UserWriteRepository) FindUserByEmail(ctx context.Context, email string) (models.User, error) {
 	row, err := r.queries.FindUserByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.User{}, usererrors.ErrUserNotFound{}
+		return models.User{}, usererrors.ErrUserNotFound{Email: email}
 	}
 	if err != nil {
-		return models.User{}, usererrors.ErrEmailLookupFailed{Cause: err}
+		return models.User{}, usererrors.ErrFindUserFailed{Email: email, Cause: err}
 	}
 
 	return mappers.UserFromEmailMapper(row), nil
@@ -88,10 +84,10 @@ func (r UserWriteRepository) FindUserCredentialsByEmail(
 ) (models.UserCredentials, error) {
 	row, err := r.queries.FindUserCredentialsByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.UserCredentials{}, usererrors.ErrUserNotFound{}
+		return models.UserCredentials{}, usererrors.ErrUserNotFound{Email: email}
 	}
 	if err != nil {
-		return models.UserCredentials{}, usererrors.ErrEmailLookupFailed{Cause: err}
+		return models.UserCredentials{}, usererrors.ErrFindUserFailed{Email: email, Cause: err}
 	}
 
 	return mappers.UserCredentialsFromEmailMapper(row), nil
@@ -107,7 +103,7 @@ func (r UserWriteRepository) FindUserCredentialsByID(
 		return models.UserCredentials{}, usererrors.ErrUserNotFound{ID: id}
 	}
 	if err != nil {
-		return models.UserCredentials{}, usererrors.ErrIDLookupFailed{Cause: err}
+		return models.UserCredentials{}, usererrors.ErrFindUserFailed{ID: id, Cause: err}
 	}
 
 	return mappers.UserCredentialsFromIDMapper(row), nil

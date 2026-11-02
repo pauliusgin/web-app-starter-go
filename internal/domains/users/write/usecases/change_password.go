@@ -8,7 +8,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/password"
 	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
-	writerepo "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 	userevents "github.com/pauliusgin/web_app_starter-be/internal/events/user"
 )
@@ -22,7 +22,7 @@ type ChangePasswordParams struct {
 
 // ChangePasswordDependencies carries the collaborators changing a password needs.
 type ChangePasswordDependencies struct {
-	UserWriteRepository writerepo.UserRepository
+	UserWriteRepository repositories.UserRepository
 	EventDispatcher     events.Dispatcher
 }
 

@@ -16,8 +16,10 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	uploaderrors "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/models"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/models"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/queries"
+	writemodels "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
 )
 
 type uploadedFileResponse struct {
@@ -55,9 +57,13 @@ const uploadFilesDeadline = 2 * time.Minute
 // UploadFilesUseCase is the domain call the upload handler depends on.
 type UploadFilesUseCase func(ctx context.Context, params usecases.UploadFilesParams) (usecases.UploadFilesResult, error)
 
-// UploadFilesDependencies carries the collaborator the upload handler orchestrates.
+// GetUploadsByIDsUseCase is the read call the upload handler re-reads the stored uploads through.
+type GetUploadsByIDsUseCase func(ctx context.Context, params queries.GetUploadsByIDsParams) (queries.GetUploadsByIDsResult, error)
+
+// UploadFilesDependencies carries the use case storing the files and the query re-reading them.
 type UploadFilesDependencies struct {
-	UploadFiles UploadFilesUseCase
+	UploadFiles     UploadFilesUseCase
+	GetUploadsByIDs GetUploadsByIDsUseCase
 }
 
 // UploadFiles returns a handler storing the multipart files the authenticated user sends.
@@ -89,7 +95,7 @@ func UploadFiles(d UploadFilesDependencies) http.HandlerFunc {
 
 		result, err := d.UploadFiles(r.Context(), usecases.UploadFilesParams{
 			UserID:  userID,
-			Purpose: models.Purpose(firstFormValue(form, PurposeFormField)),
+			Purpose: writemodels.Purpose(firstFormValue(form, PurposeFormField)),
 			Files:   files,
 		})
 		if err != nil {
@@ -97,7 +103,17 @@ func UploadFiles(d UploadFilesDependencies) http.HandlerFunc {
 			return
 		}
 
-		handlers.WriteJSON(w, http.StatusCreated, buildUploadFilesResponse(result.Uploads))
+		uploadIDs := make([]uuid.UUID, 0, len(result.Uploads))
+		for _, upload := range result.Uploads {
+			uploadIDs = append(uploadIDs, upload.ID)
+		}
+		readResult, err := d.GetUploadsByIDs(r.Context(), queries.GetUploadsByIDsParams{UserID: userID, UploadIDs: uploadIDs})
+		if err != nil {
+			writeUploadFilesFailure(w, err)
+			return
+		}
+
+		handlers.WriteJSON(w, http.StatusCreated, buildUploadFilesResponse(readResult.Uploads))
 	}
 }
 
@@ -179,17 +195,17 @@ func firstFormValue(form *multipart.Form, field string) string {
 	return values[0]
 }
 
-func buildUploadFilesResponse(uploads []models.Upload) uploadFilesResponse {
+func buildUploadFilesResponse(uploads []models.UploadReadModel) uploadFilesResponse {
 	response := uploadFilesResponse{Uploads: make([]uploadedFileResponse, 0, len(uploads))}
 
 	for _, upload := range uploads {
 		response.Uploads = append(response.Uploads, uploadedFileResponse{
 			ID:          upload.ID,
-			Purpose:     string(upload.Purpose),
-			Kind:        string(upload.Kind),
+			Purpose:     upload.Purpose,
+			Kind:        upload.Kind,
 			MimeType:    upload.MimeType,
 			OriginalURL: upload.OriginalURL,
-			PreviewURL:  handlers.NullableString(upload.PreviewURL),
+			PreviewURL:  upload.PreviewURL,
 		})
 	}
 

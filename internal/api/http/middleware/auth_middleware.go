@@ -77,7 +77,7 @@ func RequireAuthenticatedUser(d RequireAuthenticatedUserDependencies) func(http.
 // ReadBearerToken returns the credential an Authorization header carries, or why it was rejected.
 func ReadBearerToken(rawHeader string) (string, error) {
 	if rawHeader == "" {
-		return "", ErrAuthorizationHeaderAbsent{}
+		return "", ErrAuthorizationHeaderMissing{}
 	}
 
 	scheme, accessToken, _ := strings.Cut(rawHeader, " ")
@@ -131,7 +131,7 @@ type unauthorizedChallenge struct {
 }
 
 func selectUnauthorizedChallenge(err error) unauthorizedChallenge {
-	headerAbsent := ErrAuthorizationHeaderAbsent{}
+	headerAbsent := ErrAuthorizationHeaderMissing{}
 	tokenExpired := jwt.ErrTokenExpired{}
 
 	switch {

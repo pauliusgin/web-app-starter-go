@@ -5,29 +5,24 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/google/uuid"
-
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	users "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
 
-// UserIDPathValue is the path wildcard naming the user a /users/{userID} route acts on.
-const UserIDPathValue = "userID"
-
 // DeleteUserUseCase is the domain call the deletion handler depends on.
-type DeleteUserUseCase func(ctx context.Context, params users.DeleteUserParams) error
+type DeleteUserUseCase func(ctx context.Context, params usecases.DeleteUserParams) error
 
-// DeleteUserDependencies carries the collaborator the deletion handler orchestrates.
+// DeleteUserDependencies carries the use case soft-deleting the caller's account.
 type DeleteUserDependencies struct {
 	DeleteUser DeleteUserUseCase
 }
 
-// DeleteUser returns a handler soft-deleting the account in the path when it is the caller's own.
+// DeleteUser returns a handler soft-deleting the caller's own account.
 func DeleteUser(d DeleteUserDependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		actingUserID, ok := middleware.UserIDFromContext(r.Context())
+		userID, ok := middleware.UserIDFromContext(r.Context())
 		if !ok {
 			slog.Error(handlers.RouteNotProtectedText, "path", r.URL.Path)
 			handlers.WriteJSON(w, http.StatusInternalServerError,
@@ -36,17 +31,7 @@ func DeleteUser(d DeleteUserDependencies) http.HandlerFunc {
 			return
 		}
 
-		rawTargetUserID := r.PathValue(UserIDPathValue)
-		targetUserID, err := uuid.Parse(rawTargetUserID)
-		if err != nil {
-			writeDeleteUserFailure(w, ErrUserIDMalformed{RawUserID: rawTargetUserID, Cause: err})
-			return
-		}
-
-		if err := d.DeleteUser(r.Context(), users.DeleteUserParams{
-			ActingUserID: actingUserID,
-			TargetUserID: targetUserID,
-		}); err != nil {
+		if err := d.DeleteUser(r.Context(), usecases.DeleteUserParams{UserID: userID}); err != nil {
 			writeDeleteUserFailure(w, err)
 			return
 		}
@@ -56,20 +41,10 @@ func DeleteUser(d DeleteUserDependencies) http.HandlerFunc {
 }
 
 var deleteUserRules = []handlers.RejectionRule{
-	handlers.RejectWhen[ErrUserIDMalformed](handlers.Rejection{
-		Status:  http.StatusBadRequest,
-		Code:    handlers.ErrorCodeUserIDMalformed,
-		Message: userIDMalformedText,
-	}),
-	handlers.RejectWhen[usererrors.ErrUserDeletionForbidden](handlers.Rejection{
-		Status:  http.StatusForbidden,
-		Code:    handlers.ErrorCodeUserDeletionForbidden,
-		Message: deletionNotYoursText,
-	}),
 	handlers.RejectWhen[usererrors.ErrUserNotFound](handlers.Rejection{
 		Status:  http.StatusNotFound,
 		Code:    handlers.ErrorCodeUserNotFound,
-		Message: deletedUserNotFoundText,
+		Message: userNotFoundText,
 	}),
 }
 

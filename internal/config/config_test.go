@@ -300,7 +300,7 @@ func collectReportedVariables(err error) []string {
 		return []string{typed.Variable}
 	case ErrFailedIntParse:
 		return []string{typed.Variable}
-	case ErrInvalidPort:
+	case ErrPortInvalid:
 		return []string{typed.Variable}
 	}
 	return nil

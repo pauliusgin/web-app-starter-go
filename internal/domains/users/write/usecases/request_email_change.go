@@ -7,7 +7,7 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
 	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	writerepo "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 )
 
 // RequestEmailChangeParams is the authenticated user and the address they want.
@@ -18,7 +18,7 @@ type RequestEmailChangeParams struct {
 
 // RequestEmailChangeDependencies carries the collaborators requesting an email change needs.
 type RequestEmailChangeDependencies struct {
-	UserWriteRepository   writerepo.UserRepository
+	UserWriteRepository   repositories.UserRepository
 	GenerateAuthChallenge GenerateAuthChallenge
 }
 
@@ -37,7 +37,7 @@ func RequestEmailChange(
 		return e.ErrEmailUnchanged{Email: params.NewEmail}
 	}
 
-	if err := ensureEmailAvailable(ctx, d.UserWriteRepository, params.NewEmail); err != nil {
+	if err := ensureEmailAvailable(ctx, ensureEmailAvailableParams{UserWriteRepository: d.UserWriteRepository, Email: params.NewEmail}); err != nil {
 		return err
 	}
 

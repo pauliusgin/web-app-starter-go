@@ -13,9 +13,9 @@ import (
 
 func rotateForTest(
 	t *testing.T,
-	store *inMemoryTokenStore,
+	store *InMemoryRefreshTokenRepository,
 	presentedToken string,
-) (Rotated, error) {
+) (RotateResult, error) {
 	t.Helper()
 
 	return Rotate(context.Background(),
@@ -29,7 +29,7 @@ func rotateForTest(
 func TestRotateRefreshTokenReplacesALiveTokenWithANewOne(t *testing.T) {
 	store := newInMemoryTokenStore()
 	userID := uuid.New()
-	presentedToken := store.seedToken(t, seedTokenParams{UserID: userID})
+	presentedToken := seedToken(t, store, seedTokenParams{UserID: userID})
 
 	rotatedAfter := time.Now()
 	rotated, err := rotateForTest(t, store, presentedToken)
@@ -50,10 +50,10 @@ func TestRotateRefreshTokenReplacesALiveTokenWithANewOne(t *testing.T) {
 			rotated.ExpiresAt, rotatedAfter, rotatedBefore)
 	}
 
-	if !store.tokenByPlaintext(t, presentedToken).IsRevoked() {
+	if !tokenByPlaintext(t, store, presentedToken).IsRevoked() {
 		t.Error("the presented token is still live, want it revoked by the rotation")
 	}
-	replacementToken := store.tokenByPlaintext(t, rotated.Plaintext)
+	replacementToken := tokenByPlaintext(t, store, rotated.Plaintext)
 	if replacementToken.IsRevoked() {
 		t.Error("the replacement token is revoked, want it live")
 	}
@@ -64,9 +64,9 @@ func TestRotateRefreshTokenReplacesALiveTokenWithANewOne(t *testing.T) {
 		t.Errorf("stored hash = %q, want the hash of the returned plaintext",
 			replacementToken.TokenHash)
 	}
-	if len(store.tokensForUser(userID)) != 2 {
+	if len(tokensForUser(store, userID)) != 2 {
 		t.Errorf("stored rows = %d, want the revoked original beside its replacement",
-			len(store.tokensForUser(userID)))
+			len(tokensForUser(store, userID)))
 	}
 }
 
@@ -74,8 +74,8 @@ func TestRotateRefreshTokenSurfacesALookupFailureUnchanged(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
 	userID := uuid.New()
-	presentedToken := store.seedToken(t, seedTokenParams{UserID: userID})
-	store.lookupFailure = ErrRefreshTokenLookupFailed{Cause: cause}
+	presentedToken := seedToken(t, store, seedTokenParams{UserID: userID})
+	store.FindFailure = ErrRefreshTokenLookupFailed{Cause: cause}
 
 	rotated, err := rotateForTest(t, store, presentedToken)
 
@@ -85,15 +85,15 @@ func TestRotateRefreshTokenSurfacesALookupFailureUnchanged(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Error("the lookup failure does not unwrap to the driver error")
 	}
-	if rotated != (Rotated{}) {
+	if rotated != (RotateResult{}) {
 		t.Errorf("token = %+v, want the zero value on failure", rotated)
 	}
-	if store.tokenByPlaintext(t, presentedToken).IsRevoked() {
+	if tokenByPlaintext(t, store, presentedToken).IsRevoked() {
 		t.Error("the presented token was revoked, want it untouched when the lookup failed")
 	}
-	if len(store.tokensForUser(userID)) != 1 {
+	if len(tokensForUser(store, userID)) != 1 {
 		t.Errorf("stored rows = %d, want no replacement issued when the lookup failed",
-			len(store.tokensForUser(userID)))
+			len(tokensForUser(store, userID)))
 	}
 }
 
@@ -101,8 +101,8 @@ func TestRotateRefreshTokenSurfacesARevokeFailureUnchanged(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
 	userID := uuid.New()
-	presentedToken := store.seedToken(t, seedTokenParams{UserID: userID})
-	store.revokeFailure = ErrRevokeRefreshTokenFailed{Cause: cause}
+	presentedToken := seedToken(t, store, seedTokenParams{UserID: userID})
+	store.RevokeFailure = ErrRevokeRefreshTokenFailed{Cause: cause}
 
 	rotated, err := rotateForTest(t, store, presentedToken)
 
@@ -112,12 +112,12 @@ func TestRotateRefreshTokenSurfacesARevokeFailureUnchanged(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Error("the revoke failure does not unwrap to the driver error")
 	}
-	if rotated != (Rotated{}) {
+	if rotated != (RotateResult{}) {
 		t.Errorf("token = %+v, want the zero value on failure", rotated)
 	}
-	if len(store.tokensForUser(userID)) != 1 {
+	if len(tokensForUser(store, userID)) != 1 {
 		t.Errorf("stored rows = %d, want no replacement issued when the revoke failed",
-			len(store.tokensForUser(userID)))
+			len(tokensForUser(store, userID)))
 	}
 }
 
@@ -125,8 +125,8 @@ func TestRotateRefreshTokenSurfacesAnIssueFailureUnchanged(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
 	userID := uuid.New()
-	presentedToken := store.seedToken(t, seedTokenParams{UserID: userID})
-	store.saveFailure = ErrSaveRefreshTokenFailed{Cause: cause}
+	presentedToken := seedToken(t, store, seedTokenParams{UserID: userID})
+	store.SaveFailure = ErrSaveRefreshTokenFailed{Cause: cause}
 
 	rotated, err := rotateForTest(t, store, presentedToken)
 
@@ -136,11 +136,11 @@ func TestRotateRefreshTokenSurfacesAnIssueFailureUnchanged(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Error("the issue failure does not unwrap to the driver error")
 	}
-	if rotated != (Rotated{}) {
+	if rotated != (RotateResult{}) {
 		t.Errorf("token = %+v, want the zero value on failure", rotated)
 	}
-	if len(store.tokensForUser(userID)) != 1 {
+	if len(tokensForUser(store, userID)) != 1 {
 		t.Errorf("stored rows = %d, want no replacement stored when issuing failed",
-			len(store.tokensForUser(userID)))
+			len(tokensForUser(store, userID)))
 	}
 }

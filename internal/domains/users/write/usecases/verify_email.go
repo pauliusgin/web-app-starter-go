@@ -9,7 +9,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
 	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
-	writerepo "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 	userevents "github.com/pauliusgin/web_app_starter-be/internal/events/user"
 )
@@ -29,9 +29,9 @@ type FindAuthChallengeByTokenHash func(
 // ConsumeAuthChallenge is the challenge-spending call verifying an email depends on.
 type ConsumeAuthChallenge func(ctx context.Context, challengeID uuid.UUID) error
 
-// VerifyEmailDependencies carries the collaborators verifying an email needs.
+// VerifyEmailDependencies carries the user store, the event dispatcher and the challenge lookup and spend calls.
 type VerifyEmailDependencies struct {
-	UserWriteRepository          writerepo.UserRepository
+	UserWriteRepository          repositories.UserRepository
 	EventDispatcher              events.Dispatcher
 	FindAuthChallengeByTokenHash FindAuthChallengeByTokenHash
 	ConsumeAuthChallenge         ConsumeAuthChallenge
@@ -85,7 +85,7 @@ func markCurrentEmailVerified(
 		return err
 	}
 
-	userevents.DispatchEmailVerified(ctx, d.EventDispatcher, userevents.EmailVerifiedParams{
+	userevents.DispatchUserEmailVerified(ctx, d.EventDispatcher, userevents.NewUserEmailVerifiedParams{
 		UserID: verified.ID,
 		Email:  verified.Email,
 	})

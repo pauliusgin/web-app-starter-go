@@ -20,7 +20,7 @@ type changePasswordRequest struct {
 // ChangePasswordUseCase is the domain call the password change handler depends on.
 type ChangePasswordUseCase func(ctx context.Context, params usecases.ChangePasswordParams) error
 
-// ChangePasswordDependencies carries the collaborator the password change handler orchestrates.
+// ChangePasswordDependencies carries the use case swapping in the caller's new password.
 type ChangePasswordDependencies struct {
 	ChangePassword ChangePasswordUseCase
 }
@@ -43,11 +43,11 @@ func ChangePassword(d ChangePasswordDependencies) http.HandlerFunc {
 			return
 		}
 
-		changePasswordInput := input.ChangePasswordInput{
+		changePasswordInput, err := input.ValidateChangePasswordInput(input.ChangePasswordInput{
 			CurrentPassword: request.CurrentPassword,
 			NewPassword:     request.NewPassword,
-		}
-		if err := input.ValidateChangePasswordInput(changePasswordInput); err != nil {
+		})
+		if err != nil {
 			writeChangePasswordFailure(w, err)
 			return
 		}

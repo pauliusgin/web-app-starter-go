@@ -16,18 +16,25 @@ func TestValidateSignUpInput(t *testing.T) {
 	cases := []struct {
 		name          string
 		input         SignUpInput
+		want          SignUpInput
 		wantErr       bool
 		wantErrTarget any
 	}{
 		{
 			name:  "valid email and password",
 			input: SignUpInput{Email: testEmail, Password: testPassword},
+			want:  SignUpInput{Email: testEmail, Password: testPassword},
+		},
+		{
+			name:  "email is trimmed and lowercased, password kept verbatim",
+			input: SignUpInput{Email: " Accountant@Example.COM ", Password: testPassword},
+			want:  SignUpInput{Email: testEmail, Password: testPassword},
 		},
 		{
 			name:          "invalid email",
 			input:         SignUpInput{Email: "bob", Password: testPassword},
 			wantErr:       true,
-			wantErrTarget: &primitive.ErrInvalidEmail{},
+			wantErrTarget: &primitive.ErrEmailInvalid{},
 		},
 		{
 			name:          "short password",
@@ -51,17 +58,20 @@ func TestValidateSignUpInput(t *testing.T) {
 			name:          "both invalid reports the email first",
 			input:         SignUpInput{Email: "bob", Password: "short12"},
 			wantErr:       true,
-			wantErrTarget: &primitive.ErrInvalidEmail{},
+			wantErrTarget: &primitive.ErrEmailInvalid{},
 		},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := ValidateSignUpInput(testCase.input)
+			got, err := ValidateSignUpInput(testCase.input)
 
 			if !testCase.wantErr {
 				if err != nil {
 					t.Fatalf("ValidateSignUpInput: %v", err)
+				}
+				if got != testCase.want {
+					t.Fatalf("ValidateSignUpInput = %+v, want %+v", got, testCase.want)
 				}
 				return
 			}

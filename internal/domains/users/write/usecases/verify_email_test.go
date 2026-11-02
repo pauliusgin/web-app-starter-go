@@ -11,614 +11,304 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/token"
-	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
+	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 const presentedVerificationToken = "Kq7wL2mZ9xR4tV6yB1nH8pD3sG5jF0aC"
 
-type inMemoryChallengeLookup struct {
-	rows           []challenge.Challenge
-	lookupFailure  error
-	consumeFailure error
-}
+const unmatchedVerificationToken = "Zx1cV4bN7mQ0wE3rT6yU9iO2pA5sD8fG"
 
-func newInMemoryChallengeLookup() *inMemoryChallengeLookup {
-	return &inMemoryChallengeLookup{}
-}
+// liveLinkExpiresAt and expiredLinkExpiresAt sit far either side of the wall clock the repository checks against.
+var liveLinkExpiresAt = time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC)
 
-func (s *inMemoryChallengeLookup) FindByTokenHash(
-	_ context.Context,
-	tokenHash string,
-) (challenge.Challenge, error) {
-	if s.lookupFailure != nil {
-		return challenge.Challenge{}, s.lookupFailure
-	}
-
-	for _, storedChallenge := range s.rows {
-		if storedChallenge.TokenHash != tokenHash {
-			continue
-		}
-		if storedChallenge.IsUsed() || storedChallenge.IsExpired(time.Now()) {
-			break
-		}
-
-		return storedChallenge, nil
-	}
-
-	return challenge.Challenge{}, challenge.ErrChallengeNotFound{}
-}
-
-func (s *inMemoryChallengeLookup) MarkUsed(_ context.Context, challengeID uuid.UUID) error {
-	if s.consumeFailure != nil {
-		return s.consumeFailure
-	}
-
-	for index, storedChallenge := range s.rows {
-		if storedChallenge.ID == challengeID {
-			s.rows[index].UsedAt = fixedVerifiedAt
-		}
-	}
-
-	return nil
-}
-
-func (s *inMemoryChallengeLookup) challengeByID(id uuid.UUID) (challenge.Challenge, bool) {
-	for _, storedChallenge := range s.rows {
-		if storedChallenge.ID == id {
-			return storedChallenge, true
-		}
-	}
-
-	return challenge.Challenge{}, false
-}
+var expiredLinkExpiresAt = time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 type verifyEmailFixture struct {
-	users       *inMemoryUserStore
-	challenges  *inMemoryChallengeLookup
-	userID      uuid.UUID
-	challengeID uuid.UUID
+	users      *repositories.InMemoryUserRepository
+	challenges *challenge.InMemoryChallengeRepository
+	events     *eventstest.CapturedEvents
+	userID     uuid.UUID
 }
 
-func newVerifyEmailFixture(t *testing.T) *verifyEmailFixture {
+// newVerifyEmailFixture seeds an unverified user on testEmail and one live link proving challengeTarget.
+func newVerifyEmailFixture(t *testing.T, challengeTarget string) *verifyEmailFixture {
 	t.Helper()
 
-	users := newInMemoryUserStore()
-	users.saveUserForTest(t, testEmail)
-
-	userID := users.savedUsers[0].ID
-	challengeID := uuid.New()
-
-	challenges := newInMemoryChallengeLookup()
-	challenges.rows = append(challenges.rows, challenge.Challenge{
-		ID:         challengeID,
-		UserID:     userID,
-		TargetType: challenge.TargetTypeEmail,
-		Target:     testEmail,
-		Purpose:    challenge.PurposeEmailVerification,
-		TokenHash:  token.Hash(presentedVerificationToken),
-		CreatedAt:  fixedCreatedAt,
-		ExpiresAt:  time.Now().Add(challenge.Lifetime),
-	})
+	users := repositories.NewInMemoryUserRepository()
+	userID := seedUser(t, users, seedUserParams{email: testEmail})
 
 	return &verifyEmailFixture{
-		users:       users,
-		challenges:  challenges,
-		userID:      userID,
-		challengeID: challengeID,
-	}
-}
-
-func (f *verifyEmailFixture) dependencies() VerifyEmailDependencies {
-	return VerifyEmailDependencies{
-		UserWriteRepository:          f.users,
-		FindAuthChallengeByTokenHash: f.challenges.FindByTokenHash,
-		ConsumeAuthChallenge:         f.challenges.MarkUsed,
+		users: users,
+		challenges: challenge.NewInMemoryChallengeRepository(challenge.Challenge{
+			ID:         uuid.New(),
+			UserID:     userID,
+			TargetType: challenge.TargetTypeEmail,
+			Target:     challengeTarget,
+			Purpose:    challenge.PurposeEmailVerification,
+			TokenHash:  token.Hash(presentedVerificationToken),
+			CreatedAt:  fixedSeededAt,
+			ExpiresAt:  liveLinkExpiresAt,
+		}),
+		events: &eventstest.CapturedEvents{},
+		userID: userID,
 	}
 }
 
 func (f *verifyEmailFixture) verify(params VerifyEmailParams) error {
-	return VerifyEmail(context.Background(), f.dependencies(), params)
-}
-
-func (f *verifyEmailFixture) assertNothingWasWritten(t *testing.T) {
-	t.Helper()
-
-	storedUser, err := f.users.FindUserByID(context.Background(), f.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if !storedUser.EmailVerifiedAt.IsZero() {
-		t.Error("EmailVerifiedAt is stamped, want the user left unverified by a rejected request")
-	}
-
-	storedChallenge, found := f.challenges.challengeByID(f.challengeID)
-	if !found {
-		t.Fatal("the challenge is gone")
-	}
-	if storedChallenge.IsUsed() {
-		t.Error("IsUsed() = true, want the challenge left unspent by a rejected request")
-	}
-}
-
-func TestVerifyEmailStampsTheUserAndSpendsTheChallenge(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-	if err != nil {
-		t.Fatalf("VerifyEmail: %v", err)
-	}
-
-	storedUser, err := fixture.users.FindUserByID(context.Background(), fixture.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if storedUser.EmailVerifiedAt.IsZero() {
-		t.Error("EmailVerifiedAt is the zero time, want the user stamped verified")
-	}
-
-	storedChallenge, found := fixture.challenges.challengeByID(fixture.challengeID)
-	if !found {
-		t.Fatal("the challenge is gone")
-	}
-	if !storedChallenge.IsUsed() {
-		t.Error("IsUsed() = false, want the challenge spent so the link cannot be replayed")
-	}
-}
-
-func TestVerifyEmailSucceedsOnASecondClick(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-
-	params := VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	}
-
-	if err := fixture.verify(params); err != nil {
-		t.Fatalf("the first VerifyEmail: %v", err)
-	}
-
-	if err := fixture.verify(params); err != nil {
-		t.Fatalf("the second VerifyEmail: %v, want a link clicked twice to succeed", err)
-	}
-
-	storedUser, err := fixture.users.FindUserByID(context.Background(), fixture.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if storedUser.EmailVerifiedAt.IsZero() {
-		t.Error("EmailVerifiedAt is the zero time, want the stamp the first click wrote left in place")
-	}
-}
-
-func TestVerifyEmailRejectsALinkMatchingNothingForAnUnverifiedUser(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: "Zx1cV4bN7mQ0wE3rT6yU9iO2pA5sD8fG",
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &usererrors.ErrVerificationLinkInvalid{}) {
-		t.Fatalf("error = %v, want ErrVerificationLinkInvalid", err)
-	}
-
-	fixture.assertNothingWasWritten(t)
-}
-
-func TestVerifyEmailRejectsAnExpiredLinkForAnUnverifiedUser(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	fixture.challenges.rows[0].ExpiresAt = time.Now().Add(-time.Minute)
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &usererrors.ErrVerificationLinkInvalid{}) {
-		t.Fatalf("error = %v, want ErrVerificationLinkInvalid", err)
-	}
-
-	fixture.assertNothingWasWritten(t)
-}
-
-func TestVerifyEmailRejectsAChallengeMintedForAnotherUser(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	fixture.challenges.rows[0].UserID = uuid.New()
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &challenge.ErrChallengeOwnedByAnotherUser{}) {
-		t.Fatalf("error = %v, want ErrChallengeOwnedByAnotherUser", err)
-	}
-
-	fixture.assertNothingWasWritten(t)
-}
-
-func TestVerifyEmailTrustsTheAuthenticatedIdentityOverTheChallengesOwn(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-
-	victimID := fixture.userID
-	attackerID := uuid.New()
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            attackerID,
-	})
-
-	if !errors.As(err, &challenge.ErrChallengeOwnedByAnotherUser{}) {
-		t.Fatalf("error = %v, want ErrChallengeOwnedByAnotherUser", err)
-	}
-
-	storedUser, err := fixture.users.FindUserByID(context.Background(), victimID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if !storedUser.EmailVerifiedAt.IsZero() {
-		t.Error("EmailVerifiedAt is stamped, want the challenge's own user id never acted on")
-	}
-}
-
-func TestVerifyEmailRejectsAChallengeMintedForAnotherPurpose(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	fixture.challenges.rows[0].Purpose = challenge.PasswordReset
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-
-	purposeMismatch := challenge.ErrChallengePurposeMismatch{}
-	if !errors.As(err, &purposeMismatch) {
-		t.Fatalf("error = %v, want ErrChallengePurposeMismatch", err)
-	}
-	if purposeMismatch.Want != challenge.PurposeEmailVerification {
-		t.Errorf("Want = %q, want %q", purposeMismatch.Want, challenge.PurposeEmailVerification)
-	}
-	if purposeMismatch.Got != challenge.PasswordReset {
-		t.Errorf("Got = %q, want %q", purposeMismatch.Got, challenge.PasswordReset)
-	}
-
-	fixture.assertNothingWasWritten(t)
-}
-
-func TestVerifyEmailPropagatesALookupFailureRatherThanCallingTheLinkInvalid(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	databaseFailure := errors.New("connection reset")
-	fixture.challenges.lookupFailure = challenge.ErrChallengeLookupFailed{Cause: databaseFailure}
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &challenge.ErrChallengeLookupFailed{}) {
-		t.Fatalf("error = %v, want ErrChallengeLookupFailed", err)
-	}
-	if !errors.Is(err, databaseFailure) {
-		t.Error("the underlying database failure did not survive unwrapping")
-	}
-
-	fixture.assertNothingWasWritten(t)
-}
-
-func TestVerifyEmailPropagatesAFailedVerificationStampAndLeavesTheChallengeLive(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	databaseFailure := errors.New("disk full")
-	fixture.users.markVerifiedFailure = usererrors.ErrMarkEmailVerifiedFailed{Cause: databaseFailure}
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &usererrors.ErrMarkEmailVerifiedFailed{}) {
-		t.Fatalf("error = %v, want ErrMarkEmailVerifiedFailed", err)
-	}
-
-	storedChallenge, found := fixture.challenges.challengeByID(fixture.challengeID)
-	if !found {
-		t.Fatal("the challenge is gone")
-	}
-	if storedChallenge.IsUsed() {
-		t.Error("IsUsed() = true, want the challenge left live when the stamp failed")
-	}
-}
-
-func TestVerifyEmailReportsAFailureToSpendTheChallenge(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	fixture.challenges.consumeFailure = challenge.ErrConsumeChallengeFailed{
-		Cause: errors.New("deadlock detected"),
-	}
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &challenge.ErrConsumeChallengeFailed{}) {
-		t.Fatalf("error = %v, want ErrConsumeChallengeFailed", err)
-	}
-
-	storedUser, err := fixture.users.FindUserByID(context.Background(), fixture.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if storedUser.EmailVerifiedAt.IsZero() {
-		t.Error("EmailVerifiedAt is the zero time, want the stamp kept even though spending failed")
-	}
-}
-
-func TestVerifyEmailPropagatesAFailedUserLookupRatherThanCallingTheLinkInvalid(t *testing.T) {
-	fixture := newVerifyEmailFixture(t)
-	databaseFailure := errors.New("connection refused")
-	fixture.users.lookupFailure = usererrors.ErrIDLookupFailed{Cause: databaseFailure}
-
-	err := fixture.verify(VerifyEmailParams{
-		VerificationToken: "Zx1cV4bN7mQ0wE3rT6yU9iO2pA5sD8fG",
-		UserID:            fixture.userID,
-	})
-
-	if !errors.As(err, &usererrors.ErrIDLookupFailed{}) {
-		t.Fatalf("error = %v, want ErrIDLookupFailed", err)
-	}
-	if errors.As(err, &usererrors.ErrVerificationLinkInvalid{}) {
-		t.Error("a failed lookup was reported as an invalid link")
-	}
-	if !errors.Is(err, databaseFailure) {
-		t.Error("the underlying database failure did not survive unwrapping")
-	}
-}
-
-type emailSwitchFixture struct {
-	users       *inMemoryUserStore
-	challenges  *inMemoryChallengeLookup
-	eventLog    *inMemoryEventLog
-	broker      *inMemoryBroker
-	userID      uuid.UUID
-	challengeID uuid.UUID
-}
-
-func newEmailSwitchFixture(t *testing.T) *emailSwitchFixture {
-	t.Helper()
-
-	users := newInMemoryUserStore()
-	users.saveUserForTest(t, testEmail)
-
-	userID := users.savedUsers[0].ID
-	challengeID := uuid.New()
-
-	challenges := newInMemoryChallengeLookup()
-	challenges.rows = append(challenges.rows, challenge.Challenge{
-		ID:         challengeID,
-		UserID:     userID,
-		TargetType: challenge.TargetTypeEmail,
-		Target:     requestedNewEmail,
-		Purpose:    challenge.PurposeEmailVerification,
-		TokenHash:  token.Hash(presentedVerificationToken),
-		CreatedAt:  fixedCreatedAt,
-		ExpiresAt:  time.Now().Add(challenge.Lifetime),
-	})
-
-	return &emailSwitchFixture{
-		users:       users,
-		challenges:  challenges,
-		eventLog:    newInMemoryEventLog(),
-		broker:      newInMemoryBroker(),
-		userID:      userID,
-		challengeID: challengeID,
-	}
-}
-
-func (f *emailSwitchFixture) verify(params VerifyEmailParams) error {
-	recorder := func(ctx context.Context, event events.NewEvent) error {
-		_, err := events.Record(ctx, events.RecordDependencies{EventWriteRepository: f.eventLog}, event)
-		return err
-	}
-
 	return VerifyEmail(context.Background(), VerifyEmailDependencies{
 		UserWriteRepository:          f.users,
-		EventDispatcher:              events.Dispatcher{Recorder: recorder, Publisher: f.broker.publish},
+		EventDispatcher:              f.events.Dispatcher(),
 		FindAuthChallengeByTokenHash: f.challenges.FindByTokenHash,
 		ConsumeAuthChallenge:         f.challenges.MarkUsed,
 	}, params)
 }
 
-func (f *emailSwitchFixture) validParams() VerifyEmailParams {
-	return VerifyEmailParams{
-		VerificationToken: presentedVerificationToken,
-		UserID:            f.userID,
-	}
+func (f *verifyEmailFixture) clickLink() error {
+	return f.verify(VerifyEmailParams{VerificationToken: presentedVerificationToken, UserID: f.userID})
 }
 
-func (f *emailSwitchFixture) assertEmailLeftUnchanged(t *testing.T) {
+func (f *verifyEmailFixture) stored(t *testing.T) repositories.InMemoryUser {
 	t.Helper()
 
-	storedUser, err := f.users.FindUserByID(context.Background(), f.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if storedUser.Email != testEmail {
-		t.Errorf("stored email = %q, want %q left in place by a rejected switch", storedUser.Email, testEmail)
-	}
-	if len(f.eventLog.recordedEvents) != 0 || len(f.broker.publishedEvents) != 0 {
-		t.Errorf("recorded/published events = %d/%d, want none for a rejected switch",
-			len(f.eventLog.recordedEvents), len(f.broker.publishedEvents))
-	}
+	return storedUser(t, f.users, f.userID)
 }
 
-func (f *emailSwitchFixture) assertChallengeUnspent(t *testing.T) {
+func (f *verifyEmailFixture) assertChallengeSpent(t *testing.T, wantSpent bool) {
 	t.Helper()
 
-	storedChallenge, found := f.challenges.challengeByID(f.challengeID)
-	if !found {
-		t.Fatal("the challenge is gone")
-	}
-	if storedChallenge.IsUsed() {
-		t.Error("IsUsed() = true, want the challenge left unspent so the link can be retried")
+	if spent := f.challenges.Challenges[0].IsUsed(); spent != wantSpent {
+		t.Errorf("challenge IsUsed() = %t, want %t", spent, wantSpent)
 	}
 }
 
-func TestVerifyEmailSwitchesToAProvenNewAddressAndSpendsTheChallenge(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
+func (f *verifyEmailFixture) assertNothingWritten(t *testing.T) {
+	t.Helper()
 
-	if err := fixture.verify(fixture.validParams()); err != nil {
+	stored := f.stored(t)
+	if stored.User.IsEmailVerified() || stored.User.Email != testEmail {
+		t.Errorf("stored user = %+v, want it left unverified on %q", stored.User, testEmail)
+	}
+	f.assertChallengeSpent(t, false)
+	f.events.AssertNoneDispatched(t)
+}
+
+func TestVerifyEmailStampsTheCurrentAddressSpendsTheLinkAndAnnouncesIt(t *testing.T) {
+	fixture := newVerifyEmailFixture(t, testEmail)
+
+	if err := fixture.clickLink(); err != nil {
 		t.Fatalf("VerifyEmail: %v", err)
 	}
 
-	storedUser, err := fixture.users.FindUserByID(context.Background(), fixture.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
+	if !fixture.stored(t).User.IsEmailVerified() {
+		t.Error("IsEmailVerified() = false, want the user stamped verified")
 	}
-	if storedUser.Email != requestedNewEmail {
-		t.Errorf("stored email = %q, want %q", storedUser.Email, requestedNewEmail)
-	}
-	if !storedUser.EmailVerifiedAt.Equal(fixedVerifiedAt) {
-		t.Errorf("EmailVerifiedAt = %v, want %v since the link proved the new address",
-			storedUser.EmailVerifiedAt, fixedVerifiedAt)
-	}
-
-	storedChallenge, found := fixture.challenges.challengeByID(fixture.challengeID)
-	if !found {
-		t.Fatal("the challenge is gone")
-	}
-	if !storedChallenge.IsUsed() {
-		t.Error("IsUsed() = false, want the challenge spent so the link cannot be replayed")
-	}
+	fixture.assertChallengeSpent(t, true)
+	fixture.events.OnlyDispatchedBy(t, eventstest.DispatchedBy{Label: events.UserEmailVerifiedLabel, UserID: fixture.userID})
 }
 
-func TestVerifyEmailAnnouncesASwitchWithBothAddresses(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
+func TestVerifyEmailSwitchesToAProvenNewAddressAndAnnouncesBothAddresses(t *testing.T) {
+	fixture := newVerifyEmailFixture(t, requestedNewEmail)
 
-	if err := fixture.verify(fixture.validParams()); err != nil {
+	if err := fixture.clickLink(); err != nil {
 		t.Fatalf("VerifyEmail: %v", err)
 	}
 
-	if len(fixture.eventLog.recordedEvents) != 1 || len(fixture.broker.publishedEvents) != 1 {
-		t.Fatalf("recorded/published events = %d/%d, want 1/1",
-			len(fixture.eventLog.recordedEvents), len(fixture.broker.publishedEvents))
+	stored := fixture.stored(t)
+	if stored.User.Email != requestedNewEmail || !stored.User.IsEmailVerified() {
+		t.Errorf("stored user = %+v, want it moved to a verified %q", stored.User, requestedNewEmail)
 	}
+	fixture.assertChallengeSpent(t, true)
 
-	published := fixture.broker.publishedEvents[0]
-	if published.Label != events.UserEmailChangedLabel {
-		t.Errorf("Label = %q, want %q", published.Label, events.UserEmailChangedLabel)
-	}
-
+	changed := fixture.events.OnlyDispatchedBy(t, eventstest.DispatchedBy{Label: events.UserEmailChangedLabel, UserID: fixture.userID})
 	payload := struct {
-		UserID        uuid.UUID `json:"userId"`
-		PreviousEmail string    `json:"previousEmail"`
-		Email         string    `json:"email"`
+		PreviousEmail string `json:"previousEmail"`
+		Email         string `json:"email"`
 	}{}
-	if err := json.Unmarshal(published.Data, &payload); err != nil {
-		t.Fatalf("unmarshalling the event data: %v", err)
+	if err := json.Unmarshal(changed.Data, &payload); err != nil {
+		t.Fatalf("decoding the event: %v", err)
 	}
-	if payload.UserID != fixture.userID || payload.PreviousEmail != testEmail || payload.Email != requestedNewEmail {
-		t.Errorf("payload = %+v, want user %s moving from %q to %q",
-			payload, fixture.userID, testEmail, requestedNewEmail)
-	}
-}
-
-func TestVerifyEmailAnnouncesAVerifiedCurrentAddressAsVerifiedNotChanged(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
-	fixture.challenges.rows[0].Target = testEmail
-
-	if err := fixture.verify(fixture.validParams()); err != nil {
-		t.Fatalf("VerifyEmail: %v", err)
-	}
-
-	if len(fixture.broker.publishedEvents) != 1 {
-		t.Fatalf("published events = %d, want 1", len(fixture.broker.publishedEvents))
-	}
-	if label := fixture.broker.publishedEvents[0].Label; label != events.EmailVerifiedLabel {
-		t.Errorf("Label = %q, want %q", label, events.EmailVerifiedLabel)
-	}
-
-	storedUser, err := fixture.users.FindUserByID(context.Background(), fixture.userID)
-	if err != nil {
-		t.Fatalf("finding the user: %v", err)
-	}
-	if storedUser.Email != testEmail {
-		t.Errorf("stored email = %q, want %q kept", storedUser.Email, testEmail)
+	if payload.PreviousEmail != testEmail || payload.Email != requestedNewEmail {
+		t.Errorf("payload = %+v, want a move from %q to %q", payload, testEmail, requestedNewEmail)
 	}
 }
 
-func TestVerifyEmailAcceptsASwitchLinkClickedTwiceOnceTheNewAddressIsVerified(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
+func TestVerifyEmailAcceptsASecondClickWithoutAnnouncingAgain(t *testing.T) {
+	for _, challengeTarget := range []string{testEmail, requestedNewEmail} {
+		t.Run(challengeTarget, func(t *testing.T) {
+			fixture := newVerifyEmailFixture(t, challengeTarget)
 
-	if err := fixture.verify(fixture.validParams()); err != nil {
-		t.Fatalf("the first VerifyEmail: %v", err)
-	}
+			if err := fixture.clickLink(); err != nil {
+				t.Fatalf("the first VerifyEmail: %v", err)
+			}
+			if err := fixture.clickLink(); err != nil {
+				t.Fatalf("the second VerifyEmail: %v, want a link clicked twice to succeed", err)
+			}
 
-	if err := fixture.verify(fixture.validParams()); err != nil {
-		t.Fatalf("the second VerifyEmail: %v, want a link clicked twice to succeed", err)
-	}
-	if len(fixture.broker.publishedEvents) != 1 {
-		t.Errorf("published events = %d, want only the first click announced", len(fixture.broker.publishedEvents))
+			if len(fixture.events.Recorded) != 1 {
+				t.Errorf("dispatched events = %d, want only the first click announced", len(fixture.events.Recorded))
+			}
+		})
 	}
 }
 
-func TestVerifyEmailRejectsASwitchToAnAddressClaimedSinceTheRequest(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
-	fixture.users.saveUserForTest(t, requestedNewEmail)
-
-	err := fixture.verify(fixture.validParams())
-
-	taken := usererrors.ErrEmailTaken{}
-	if !errors.As(err, &taken) {
-		t.Fatalf("error = %v, want ErrEmailTaken", err)
+func TestVerifyEmailRejectsALinkThatProvesNothingForThisUser(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(fixture *verifyEmailFixture) VerifyEmailParams
+		wantErr func(err error) bool
+	}{
+		{
+			name: "token matching no challenge",
+			arrange: func(fixture *verifyEmailFixture) VerifyEmailParams {
+				return VerifyEmailParams{VerificationToken: unmatchedVerificationToken, UserID: fixture.userID}
+			},
+			wantErr: isError[e.ErrVerificationLinkInvalid],
+		},
+		{
+			name: "expired challenge",
+			arrange: func(fixture *verifyEmailFixture) VerifyEmailParams {
+				fixture.challenges.Challenges[0].ExpiresAt = expiredLinkExpiresAt
+				return VerifyEmailParams{VerificationToken: presentedVerificationToken, UserID: fixture.userID}
+			},
+			wantErr: isError[e.ErrVerificationLinkInvalid],
+		},
+		{
+			// The authenticated identity wins: another user's link must never stamp its owner.
+			name: "challenge minted for another user",
+			arrange: func(fixture *verifyEmailFixture) VerifyEmailParams {
+				return VerifyEmailParams{VerificationToken: presentedVerificationToken, UserID: uuid.New()}
+			},
+			wantErr: isError[challenge.ErrChallengeOwnedByAnotherUser],
+		},
+		{
+			name: "challenge minted for another purpose",
+			arrange: func(fixture *verifyEmailFixture) VerifyEmailParams {
+				fixture.challenges.Challenges[0].Purpose = challenge.PurposePasswordReset
+				return VerifyEmailParams{VerificationToken: presentedVerificationToken, UserID: fixture.userID}
+			},
+			wantErr: isError[challenge.ErrChallengePurposeMismatch],
+		},
 	}
-	if taken.Email != requestedNewEmail {
-		t.Errorf("ErrEmailTaken.Email = %q, want %q", taken.Email, requestedNewEmail)
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newVerifyEmailFixture(t, testEmail)
+
+			err := fixture.verify(testCase.arrange(fixture))
+
+			if !testCase.wantErr(err) {
+				t.Fatalf("error = %#v, want the case's rejection", err)
+			}
+			fixture.assertNothingWritten(t)
+		})
 	}
-	fixture.assertEmailLeftUnchanged(t)
-	fixture.assertChallengeUnspent(t)
 }
 
-func TestVerifyEmailPropagatesAFailedSwitchAndLeavesTheChallengeLive(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
-	changeFailure := usererrors.ErrChangeEmailFailed{Cause: errors.New("pq: connection refused")}
-	fixture.users.changeEmailFailure = changeFailure
-
-	err := fixture.verify(fixture.validParams())
-
-	if err != changeFailure {
-		t.Fatalf("error = %#v, want the repository's own error passed through unchanged", err)
+func TestVerifyEmailReportsALookupFailureRatherThanAnInvalidLink(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(fixture *verifyEmailFixture)
+		wantErr func(err error) bool
+	}{
+		{
+			name: "challenge lookup",
+			arrange: func(fixture *verifyEmailFixture) {
+				fixture.challenges.FindFailure = challenge.ErrChallengeLookupFailed{Cause: errors.New("connection reset")}
+			},
+			wantErr: isError[challenge.ErrChallengeLookupFailed],
+		},
+		{
+			name: "user lookup after an unmatched token",
+			arrange: func(fixture *verifyEmailFixture) {
+				fixture.challenges.Challenges = nil
+				fixture.users.LookupFailure = e.ErrFindUserFailed{Cause: errors.New("connection refused")}
+			},
+			wantErr: isError[e.ErrFindUserFailed],
+		},
 	}
-	fixture.assertEmailLeftUnchanged(t)
-	fixture.assertChallengeUnspent(t)
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newVerifyEmailFixture(t, testEmail)
+			testCase.arrange(fixture)
+
+			err := fixture.clickLink()
+
+			if !testCase.wantErr(err) || errors.As(err, &e.ErrVerificationLinkInvalid{}) {
+				t.Fatalf("error = %#v, want the lookup failure and not ErrVerificationLinkInvalid", err)
+			}
+			fixture.events.AssertNoneDispatched(t)
+		})
+	}
 }
 
-func TestVerifyEmailPropagatesAFailedUserLookupBeforeSwitching(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
-	lookupFailure := usererrors.ErrIDLookupFailed{Cause: errors.New("pq: connection refused")}
-	fixture.users.lookupFailure = lookupFailure
-
-	err := fixture.verify(fixture.validParams())
-
-	if err != lookupFailure {
-		t.Fatalf("error = %#v, want the repository's own error passed through unchanged", err)
+func TestVerifyEmailLeavesTheLinkLiveWhenTheAddressCannotBeWritten(t *testing.T) {
+	cases := []struct {
+		name            string
+		challengeTarget string
+		arrange         func(t *testing.T, fixture *verifyEmailFixture)
+		wantErr         func(err error) bool
+	}{
+		{
+			name:            "verification stamp fails",
+			challengeTarget: testEmail,
+			arrange: func(t *testing.T, fixture *verifyEmailFixture) {
+				fixture.users.MarkVerifiedFailure = e.ErrMarkEmailVerifiedFailed{Cause: errors.New("disk full")}
+			},
+			wantErr: isError[e.ErrMarkEmailVerifiedFailed],
+		},
+		{
+			name:            "switch fails",
+			challengeTarget: requestedNewEmail,
+			arrange: func(t *testing.T, fixture *verifyEmailFixture) {
+				fixture.users.ChangeEmailFailure = e.ErrChangeEmailFailed{Cause: errors.New("disk full")}
+			},
+			wantErr: isError[e.ErrChangeEmailFailed],
+		},
+		{
+			name:            "new address claimed since the request",
+			challengeTarget: requestedNewEmail,
+			arrange: func(t *testing.T, fixture *verifyEmailFixture) {
+				seedUser(t, fixture.users, seedUserParams{email: requestedNewEmail})
+			},
+			wantErr: isError[e.ErrEmailTaken],
+		},
 	}
-	fixture.assertChallengeUnspent(t)
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newVerifyEmailFixture(t, testCase.challengeTarget)
+			testCase.arrange(t, fixture)
+
+			err := fixture.clickLink()
+
+			if !testCase.wantErr(err) {
+				t.Fatalf("error = %#v, want the case's failure", err)
+			}
+			fixture.assertNothingWritten(t)
+		})
+	}
 }
 
-func TestVerifyEmailAnnouncesNoSwitchWhenSpendingTheChallengeFails(t *testing.T) {
-	fixture := newEmailSwitchFixture(t)
-	consumeFailure := errors.New("pq: connection refused")
-	fixture.challenges.consumeFailure = consumeFailure
+func TestVerifyEmailKeepsTheWriteButAnnouncesNothingWhenTheLinkCannotBeSpent(t *testing.T) {
+	for _, challengeTarget := range []string{testEmail, requestedNewEmail} {
+		t.Run(challengeTarget, func(t *testing.T) {
+			fixture := newVerifyEmailFixture(t, challengeTarget)
+			fixture.challenges.MarkUsedFailure = challenge.ErrConsumeChallengeFailed{Cause: errors.New("deadlock detected")}
 
-	err := fixture.verify(fixture.validParams())
+			err := fixture.clickLink()
 
-	if !errors.Is(err, consumeFailure) {
-		t.Fatalf("error = %v, want the consume failure", err)
-	}
-	if len(fixture.eventLog.recordedEvents) != 0 || len(fixture.broker.publishedEvents) != 0 {
-		t.Errorf("recorded/published events = %d/%d, want none when the challenge is not spent",
-			len(fixture.eventLog.recordedEvents), len(fixture.broker.publishedEvents))
+			if !errors.As(err, &challenge.ErrConsumeChallengeFailed{}) {
+				t.Fatalf("error = %v, want ErrConsumeChallengeFailed", err)
+			}
+			stored := fixture.stored(t)
+			if !stored.User.IsEmailVerified() || stored.User.Email != challengeTarget {
+				t.Errorf("stored user = %+v, want the proven %q kept even though spending failed", stored.User, challengeTarget)
+			}
+			fixture.events.AssertNoneDispatched(t)
+		})
 	}
 }

@@ -2,21 +2,21 @@ package refreshtoken
 
 import "context"
 
-// UnusedDeletionDependencies carries the collaborator purging dead tokens needs.
-type UnusedDeletionDependencies struct {
+// DeleteUnusedRefreshTokensDependencies carries the refresh token store the purge runs against.
+type DeleteUnusedRefreshTokensDependencies struct {
 	WriteRepository WriteRepository
 }
 
-// UnusedDeletionParams are the parameters for the unused token deletion.
-type UnusedDeletionParams struct {
-	CleanUpThreshold int32
+// DeleteUnusedRefreshTokensParams says how many days a revoked token outlives its revocation before it is purged.
+type DeleteUnusedRefreshTokensParams struct {
+	CleanUpThresholdInDays int32
 }
 
 // DeleteUnusedRefreshTokens purges expired and long-revoked tokens and returns the row count.
 func DeleteUnusedRefreshTokens(
 	ctx context.Context,
-	d UnusedDeletionDependencies,
-	params UnusedDeletionParams,
+	d DeleteUnusedRefreshTokensDependencies,
+	params DeleteUnusedRefreshTokensParams,
 ) (int64, error) {
-	return d.WriteRepository.DeleteUnused(ctx, params.CleanUpThreshold)
+	return d.WriteRepository.DeleteUnused(ctx, params.CleanUpThresholdInDays)
 }

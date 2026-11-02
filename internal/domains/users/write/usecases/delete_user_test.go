@@ -7,188 +7,90 @@ import (
 
 	"github.com/google/uuid"
 
-	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	user "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
+	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 type deleteUserForTest struct {
-	dependencies DeleteUserDependencies
-	store        *inMemoryUserStore
-	eventLog     *inMemoryEventLog
-	broker       *inMemoryBroker
-	userID       uuid.UUID
+	users  *repositories.InMemoryUserRepository
+	events *eventstest.CapturedEvents
+	userID uuid.UUID
 }
 
-func newDeleteUserForTest() deleteUserForTest {
-	store := newInMemoryUserStore()
-	userID := uuid.New()
-	store.savedUsers = append(store.savedUsers, user.NewUser{
-		ID:           userID,
-		Email:        testEmail,
-		PasswordHash: seededHash,
-	})
-
-	eventLog := newInMemoryEventLog()
-	broker := newInMemoryBroker()
-	recorder := func(ctx context.Context, event events.NewEvent) error {
-		_, err := events.Record(ctx, events.RecordDependencies{EventWriteRepository: eventLog}, event)
-		return err
-	}
-
-	return deleteUserForTest{
-		dependencies: DeleteUserDependencies{
-			UserWriteRepository: store,
-			EventDispatcher:     events.Dispatcher{Recorder: recorder, Publisher: broker.publish},
-		},
-		store:    store,
-		eventLog: eventLog,
-		broker:   broker,
-		userID:   userID,
-	}
-}
-
-func assertDeletionRejected(t *testing.T, harness deleteUserForTest) {
+func newDeleteUserForTest(t *testing.T) deleteUserForTest {
 	t.Helper()
 
-	if len(harness.store.softDeletedUsers) != 0 {
-		t.Errorf("soft-deleted users = %+v, want none for a rejected deletion", harness.store.softDeletedUsers)
-	}
-	if _, err := harness.store.FindUserByID(context.Background(), harness.userID); err != nil {
-		t.Errorf("FindUserByID: %v, want the account still live", err)
-	}
-	if len(harness.eventLog.recordedEvents) != 0 || len(harness.broker.publishedEvents) != 0 {
-		t.Errorf("recorded/published events = %d/%d, want no deletion event for a rejected deletion",
-			len(harness.eventLog.recordedEvents), len(harness.broker.publishedEvents))
+	users := repositories.NewInMemoryUserRepository()
+
+	return deleteUserForTest{
+		users:  users,
+		events: &eventstest.CapturedEvents{},
+		userID: seedUser(t, users, seedUserParams{email: testEmail}),
 	}
 }
 
-func TestDeleteUserSoftDeletesAndAnonymizesTheOwnAccount(t *testing.T) {
-	harness := newDeleteUserForTest()
+func (h deleteUserForTest) deleteUser(userID uuid.UUID) error {
+	return DeleteUser(context.Background(), DeleteUserDependencies{
+		UserWriteRepository: h.users,
+		EventDispatcher:     h.events.Dispatcher(),
+	}, DeleteUserParams{UserID: userID})
+}
 
-	err := DeleteUser(context.Background(), harness.dependencies, DeleteUserParams{
-		ActingUserID: harness.userID,
-		TargetUserID: harness.userID,
-	})
-	if err != nil {
+func TestDeleteUserAnonymizesTheAccountAndAnnouncesIt(t *testing.T) {
+	harness := newDeleteUserForTest(t)
+
+	if err := harness.deleteUser(harness.userID); err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 
-	if len(harness.store.softDeletedUsers) != 1 {
-		t.Fatalf("soft-deleted users = %d, want 1", len(harness.store.softDeletedUsers))
+	want := struct{ email, firstName, lastName string }{"deleted-" + harness.userID.String(), "Deleted", "User"}
+	deleted, found := harness.users.SoftDeleted[harness.userID]
+	if !found {
+		t.Fatal("the user was not soft-deleted")
 	}
-	deletedUser := harness.store.softDeletedUsers[0]
-	if wantEmail := "deleted-" + harness.userID.String(); deletedUser.Email != wantEmail {
-		t.Errorf("Email = %q, want %q", deletedUser.Email, wantEmail)
+	if deleted.AnonymizedEmail != want.email ||
+		deleted.AnonymizedFirstName != want.firstName ||
+		deleted.AnonymizedLastName != want.lastName {
+		t.Errorf("anonymized as %q %q %q, want %q %q %q", deleted.AnonymizedEmail,
+			deleted.AnonymizedFirstName, deleted.AnonymizedLastName, want.email, want.firstName, want.lastName)
 	}
-	softDeleteRequest := harness.store.softDeleteRequests[0]
-	if softDeleteRequest.AnonymizedFirstName != "Deleted" || softDeleteRequest.AnonymizedLastName != "User" {
-		t.Errorf("profile placeholders = %q %q, want %q %q",
-			softDeleteRequest.AnonymizedFirstName, softDeleteRequest.AnonymizedLastName, "Deleted", "User")
-	}
-	if _, err := harness.store.FindUserByEmail(context.Background(), testEmail); !errors.As(err, &usererrors.ErrUserNotFound{}) {
-		t.Errorf("FindUserByEmail(original) err = %v, want ErrUserNotFound once the email is freed", err)
-	}
-
-	if len(harness.eventLog.recordedEvents) != 1 {
-		t.Fatalf("recorded events = %d, want 1", len(harness.eventLog.recordedEvents))
-	}
-	recorded := harness.eventLog.recordedEvents[0]
-	if recorded.Label != events.UserDeletedLabel {
-		t.Errorf("Label = %q, want %q", recorded.Label, events.UserDeletedLabel)
-	}
-	if recorded.UserID != (uuid.NullUUID{UUID: harness.userID, Valid: true}) {
-		t.Errorf("UserID = %+v, want %s", recorded.UserID, harness.userID)
-	}
-	if len(harness.broker.publishedEvents) != 1 {
-		t.Errorf("published events = %d, want 1", len(harness.broker.publishedEvents))
-	}
+	harness.events.OnlyDispatchedBy(t, eventstest.DispatchedBy{Label: events.UserDeletedLabel, UserID: harness.userID})
 }
 
-func TestDeleteUserRejectsDeletingAnotherAccount(t *testing.T) {
-	harness := newDeleteUserForTest()
-	otherUserID := uuid.New()
-
-	err := DeleteUser(context.Background(), harness.dependencies, DeleteUserParams{
-		ActingUserID: otherUserID,
-		TargetUserID: harness.userID,
-	})
-
-	forbidden := usererrors.ErrUserDeletionForbidden{}
-	if !errors.As(err, &forbidden) {
-		t.Fatalf("err = %v, want ErrUserDeletionForbidden", err)
-	}
-	if forbidden.ActingUserID != otherUserID || forbidden.TargetUserID != harness.userID {
-		t.Errorf("forbidden = %+v, want acting %s and target %s", forbidden, otherUserID, harness.userID)
-	}
-	assertDeletionRejected(t, harness)
-}
-
-func TestDeleteUserReportsAnUnknownAccount(t *testing.T) {
-	harness := newDeleteUserForTest()
-	unknownUserID := uuid.New()
-
-	err := DeleteUser(context.Background(), harness.dependencies, DeleteUserParams{
-		ActingUserID: unknownUserID,
-		TargetUserID: unknownUserID,
-	})
-
-	if !errors.As(err, &usererrors.ErrUserNotFound{}) {
-		t.Fatalf("err = %v, want ErrUserNotFound", err)
-	}
-	assertDeletionRejected(t, harness)
-}
-
-func TestDeleteUserPropagatesARepositoryFailure(t *testing.T) {
-	harness := newDeleteUserForTest()
-	storeFailure := usererrors.ErrSoftDeleteUserFailed{Cause: errors.New("connection reset")}
-	harness.store.softDeleteFailure = storeFailure
-
-	err := DeleteUser(context.Background(), harness.dependencies, DeleteUserParams{
-		ActingUserID: harness.userID,
-		TargetUserID: harness.userID,
-	})
-
-	if !errors.As(err, &usererrors.ErrSoftDeleteUserFailed{}) {
-		t.Fatalf("err = %v, want ErrSoftDeleteUserFailed", err)
-	}
-	assertDeletionRejected(t, harness)
-}
-
-func TestDeleteUserSucceedsWhenTheEventCannotBeRecorded(t *testing.T) {
-	harness := newDeleteUserForTest()
-	harness.eventLog.failure = errors.New("event log unavailable")
-
-	err := DeleteUser(context.Background(), harness.dependencies, DeleteUserParams{
-		ActingUserID: harness.userID,
-		TargetUserID: harness.userID,
-	})
-	if err != nil {
-		t.Fatalf("DeleteUser: %v, want success despite the dispatch failure", err)
-	}
-
-	if len(harness.store.softDeletedUsers) != 1 {
-		t.Errorf("soft-deleted users = %d, want 1", len(harness.store.softDeletedUsers))
-	}
-}
-
-func TestCanDeleteUserAllowsOnlyTheOwnAccount(t *testing.T) {
-	ownUserID := uuid.New()
-
+func TestDeleteUserKeepsTheAccountAndAnnouncesNothingWhenRejected(t *testing.T) {
 	cases := []struct {
-		name   string
-		params DeleteUserParams
-		want   bool
+		name    string
+		arrange func(harness deleteUserForTest) uuid.UUID
+		wantErr func(err error) bool
 	}{
-		{name: "own account", params: DeleteUserParams{ActingUserID: ownUserID, TargetUserID: ownUserID}, want: true},
-		{name: "another account", params: DeleteUserParams{ActingUserID: ownUserID, TargetUserID: uuid.New()}},
+		{
+			name:    "unknown account",
+			arrange: func(deleteUserForTest) uuid.UUID { return uuid.New() },
+			wantErr: isError[e.ErrUserNotFound],
+		},
+		{
+			name: "deletion fails",
+			arrange: func(harness deleteUserForTest) uuid.UUID {
+				harness.users.SoftDeleteFailure = e.ErrSoftDeleteUserFailed{Cause: errors.New("connection reset")}
+				return harness.userID
+			},
+			wantErr: isError[e.ErrSoftDeleteUserFailed],
+		},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if got := CanDeleteUser(testCase.params); got != testCase.want {
-				t.Errorf("CanDeleteUser(%+v) = %v, want %v", testCase.params, got, testCase.want)
+			harness := newDeleteUserForTest(t)
+
+			err := harness.deleteUser(testCase.arrange(harness))
+
+			if !testCase.wantErr(err) {
+				t.Fatalf("error = %#v, want the case's rejection", err)
 			}
+			storedUser(t, harness.users, harness.userID)
+			harness.events.AssertNoneDispatched(t)
 		})
 	}
 }

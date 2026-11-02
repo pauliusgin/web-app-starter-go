@@ -8,18 +8,18 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/token"
 )
 
-// IssuingDependencies carries the collaborators issuing a refresh token needs.
-type IssuingDependencies struct {
+// IssueDependencies carries the refresh token store the new token is saved in.
+type IssueDependencies struct {
 	WriteRepository WriteRepository
 }
 
-// IssuingParams is the user the token belongs to.
-type IssuingParams struct {
+// IssueParams is the user the token belongs to.
+type IssueParams struct {
 	UserID uuid.UUID
 }
 
-// Issued is what the caller receives; Plaintext is the only copy that will ever exist.
-type Issued struct {
+// IssueResult is what the caller receives; Plaintext is the only copy that will ever exist.
+type IssueResult struct {
 	Plaintext string
 	ExpiresAt time.Time
 }
@@ -27,22 +27,22 @@ type Issued struct {
 // Issue mints a token, stores its hash, and hands the plaintext back to the caller.
 func Issue(
 	ctx context.Context,
-	d IssuingDependencies,
-	params IssuingParams,
-) (Issued, error) {
+	d IssueDependencies,
+	params IssueParams,
+) (IssueResult, error) {
 	minted := token.Generate()
 
 	expiresAt := time.Now().Add(Lifetime)
 
-	_, err := d.WriteRepository.Save(ctx, NewRefreshToken{
+	_, err := d.WriteRepository.SaveRefreshToken(ctx, NewRefreshToken{
 		ID:        uuid.New(),
 		UserID:    params.UserID,
 		TokenHash: minted.Hash,
 		ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		return Issued{}, err
+		return IssueResult{}, err
 	}
 
-	return Issued{Plaintext: minted.Plaintext, ExpiresAt: expiresAt}, nil
+	return IssueResult{Plaintext: minted.Plaintext, ExpiresAt: expiresAt}, nil
 }

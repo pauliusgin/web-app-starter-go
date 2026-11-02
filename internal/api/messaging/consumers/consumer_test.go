@@ -37,7 +37,7 @@ func silenceDefaultLogger(t *testing.T) {
 func newTestAuthChallengeEvent(t *testing.T, purpose challenge.Purpose) events.NewEvent {
 	t.Helper()
 
-	generated, err := auth.NewAuthChallengeGenerated(auth.NewAuthChallengeParams{
+	generated, err := auth.NewAuthChallengeGenerated(auth.NewAuthChallengeGeneratedParams{
 		ChallengeID: uuid.MustParse("6f1b1a3e-1d2c-4a5b-8c7d-9e0f1a2b3c4d"),
 		UserID:      uuid.MustParse("11111111-2222-3333-4444-555555555555"),
 		TargetType:  string(challenge.TargetTypeEmail),

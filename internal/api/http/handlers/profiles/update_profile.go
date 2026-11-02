@@ -11,7 +11,9 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/input"
 	profileerrors "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 )
 
 type updateProfileRequest struct {
@@ -28,9 +30,10 @@ type updateProfileResponse struct {
 // UpdateProfileUseCase is the domain call the profile update handler depends on.
 type UpdateProfileUseCase func(ctx context.Context, params usecases.UpdateProfileParams) (usecases.UpdateProfileResult, error)
 
-// UpdateProfileDependencies carries the collaborator the profile update handler orchestrates.
+// UpdateProfileDependencies carries the use case replacing the profile and the query re-reading it.
 type UpdateProfileDependencies struct {
-	UpdateProfile UpdateProfileUseCase
+	UpdateProfile  UpdateProfileUseCase
+	GetProfileByID GetProfileByIDUseCase
 }
 
 // UpdateProfile returns a handler replacing both names on the authenticated user's profile.
@@ -51,7 +54,7 @@ func UpdateProfile(d UpdateProfileDependencies) http.HandlerFunc {
 			return
 		}
 
-		profileInput, err := validateProfileNames(input.ProfileInput{
+		profileInput, err := input.ValidateProfileInput(input.ProfileInput{
 			FirstName: request.FirstName,
 			LastName:  request.LastName,
 		})
@@ -70,11 +73,21 @@ func UpdateProfile(d UpdateProfileDependencies) http.HandlerFunc {
 			return
 		}
 
-		handlers.WriteJSON(w, http.StatusOK, updateProfileResponse{
-			ID:        result.Profile.ID,
-			FirstName: result.Profile.FirstName,
-			LastName:  result.Profile.LastName,
-		})
+		readResult, err := d.GetProfileByID(r.Context(), queries.GetProfileByIDParams{UserID: result.Profile.ID})
+		if err != nil {
+			writeUpdateProfileFailure(w, err)
+			return
+		}
+
+		handlers.WriteJSON(w, http.StatusOK, buildUpdateProfileResponse(readResult.Profile))
+	}
+}
+
+func buildUpdateProfileResponse(profile models.ProfileReadModel) updateProfileResponse {
+	return updateProfileResponse{
+		ID:        profile.ID,
+		FirstName: profile.FirstName,
+		LastName:  profile.LastName,
 	}
 }
 

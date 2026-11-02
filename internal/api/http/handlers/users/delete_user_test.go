@@ -29,7 +29,6 @@ func (d *recordingUserDeleter) deleteUser(_ context.Context, params usecases.Del
 
 type sendDeleteUserParams struct {
 	deleter   *recordingUserDeleter
-	rawUserID string
 	skipGuard bool
 }
 
@@ -41,14 +40,11 @@ func sendDeleteUser(t *testing.T, params sendDeleteUserParams) *httptest.Respons
 		served = authenticateForTest(deletingUserID)(served)
 	}
 
-	mux := &http.ServeMux{}
-	mux.Handle("DELETE /api/v1/users/{"+UserIDPathValue+"}", served)
-
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodDelete, "/api/v1/users/"+params.rawUserID, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/users/me", nil)
 	request.Header.Set("Authorization", "Bearer header.payload.signature")
 
-	mux.ServeHTTP(recorder, request)
+	served.ServeHTTP(recorder, request)
 
 	return recorder
 }
@@ -56,7 +52,7 @@ func sendDeleteUser(t *testing.T, params sendDeleteUserParams) *httptest.Respons
 func TestDeleteUserDeletesTheAuthenticatedUsersAccount(t *testing.T) {
 	deleter := &recordingUserDeleter{}
 
-	recorder := sendDeleteUser(t, sendDeleteUserParams{deleter: deleter, rawUserID: deletingUserID.String()})
+	recorder := sendDeleteUser(t, sendDeleteUserParams{deleter: deleter})
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -68,8 +64,8 @@ func TestDeleteUserDeletesTheAuthenticatedUsersAccount(t *testing.T) {
 		t.Fatalf("DeleteUser was called %d times, want 1", len(deleter.receivedCalls))
 	}
 	call := deleter.receivedCalls[0]
-	if call.ActingUserID != deletingUserID || call.TargetUserID != deletingUserID {
-		t.Errorf("call = %+v, want acting and target %s", call, deletingUserID)
+	if call.UserID != deletingUserID {
+		t.Errorf("call = %+v, want user %s", call, deletingUserID)
 	}
 }
 
@@ -79,33 +75,11 @@ func TestDeleteUserFailsWhenTheUserIDIsMissingFromContext(t *testing.T) {
 
 	recorder := sendDeleteUser(t, sendDeleteUserParams{
 		deleter:   deleter,
-		rawUserID: deletingUserID.String(),
 		skipGuard: true,
 	})
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
-	}
-	if len(deleter.receivedCalls) != 0 {
-		t.Errorf("DeleteUser was called %d times, want 0", len(deleter.receivedCalls))
-	}
-}
-
-func TestDeleteUserRejectsAMalformedUserID(t *testing.T) {
-	silenceHandlerLogger(t)
-	deleter := &recordingUserDeleter{}
-
-	recorder := sendDeleteUser(t, sendDeleteUserParams{deleter: deleter, rawUserID: "not-a-uuid"})
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
-	}
-	body := decodeBody(t, recorder.Result())
-	if body["code"] != string(handlers.ErrorCodeUserIDMalformed) {
-		t.Errorf("code = %v, want %q", body["code"], handlers.ErrorCodeUserIDMalformed)
-	}
-	if body["message"] != userIDMalformedText {
-		t.Errorf("message = %v, want %q", body["message"], userIDMalformedText)
 	}
 	if len(deleter.receivedCalls) != 0 {
 		t.Errorf("DeleteUser was called %d times, want 0", len(deleter.receivedCalls))
@@ -121,21 +95,11 @@ func TestDeleteUserFailsWhenTheDeletionFails(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name: "the account belongs to someone else",
-			failure: usererrors.ErrUserDeletionForbidden{
-				ActingUserID: deletingUserID,
-				TargetUserID: uuid.MustParse("1d4f6a8c-2b3e-4c5d-8e9f-0a1b2c3d4e5f"),
-			},
-			wantStatus:  http.StatusForbidden,
-			wantCode:    handlers.ErrorCodeUserDeletionForbidden,
-			wantMessage: deletionNotYoursText,
-		},
-		{
 			name:        "the account no longer exists",
 			failure:     usererrors.ErrUserNotFound{ID: deletingUserID},
 			wantStatus:  http.StatusNotFound,
 			wantCode:    handlers.ErrorCodeUserNotFound,
-			wantMessage: deletedUserNotFoundText,
+			wantMessage: userNotFoundText,
 		},
 		{
 			name:        "something unexpected broke",
@@ -151,7 +115,7 @@ func TestDeleteUserFailsWhenTheDeletionFails(t *testing.T) {
 			logs := captureHandlerLogger(t)
 			deleter := &recordingUserDeleter{failure: testCase.failure}
 
-			recorder := sendDeleteUser(t, sendDeleteUserParams{deleter: deleter, rawUserID: deletingUserID.String()})
+			recorder := sendDeleteUser(t, sendDeleteUserParams{deleter: deleter})
 
 			if recorder.Code != testCase.wantStatus {
 				t.Fatalf("status = %d, want %d", recorder.Code, testCase.wantStatus)

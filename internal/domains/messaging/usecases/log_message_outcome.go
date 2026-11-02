@@ -31,7 +31,7 @@ func logMessageOutcome(ctx context.Context, d logMessageOutcomeDependencies, new
 		NewMessage: newMessage,
 	})
 
-	dispatchMessageOutcome(ctx, d.EventDispatcher, newMessage)
+	dispatchMessageOutcome(ctx, dispatchMessageOutcomeParams{EventDispatcher: d.EventDispatcher, NewMessage: newMessage})
 }
 
 type saveMessageParams struct {
@@ -47,7 +47,7 @@ func saveMessage(ctx context.Context, params saveMessageParams) {
 		return
 	}
 
-	if _, err := params.Repository.Save(ctx, params.NewMessage); err != nil {
+	if _, err := params.Repository.SaveMessage(ctx, params.NewMessage); err != nil {
 		params.Logger.Error(saveMessageFailedText,
 			"messageId", params.NewMessage.ID,
 			"recipientId", params.NewMessage.RecipientID,
@@ -57,10 +57,16 @@ func saveMessage(ctx context.Context, params saveMessageParams) {
 	}
 }
 
-func dispatchMessageOutcome(ctx context.Context, dispatcher events.Dispatcher, newMessage models.NewMessage) {
+type dispatchMessageOutcomeParams struct {
+	EventDispatcher events.Dispatcher
+	NewMessage      models.NewMessage
+}
+
+func dispatchMessageOutcome(ctx context.Context, params dispatchMessageOutcomeParams) {
+	newMessage, dispatcher := params.NewMessage, params.EventDispatcher
 	switch newMessage.Status {
 	case models.StatusSent:
-		messagingevents.DispatchMessageSent(ctx, dispatcher, messagingevents.MessageSentParams{
+		messagingevents.DispatchMessageSent(ctx, dispatcher, messagingevents.NewMessageSentParams{
 			MessageID:      newMessage.ID,
 			RecipientID:    newMessage.RecipientID,
 			RecipientEmail: newMessage.RecipientEmail,
@@ -69,7 +75,7 @@ func dispatchMessageOutcome(ctx context.Context, dispatcher events.Dispatcher, n
 			ReferenceID:    newMessage.ReferenceID,
 		})
 	case models.StatusFailed:
-		messagingevents.DispatchMessageFailed(ctx, dispatcher, messagingevents.MessageFailedParams{
+		messagingevents.DispatchMessageFailed(ctx, dispatcher, messagingevents.NewMessageFailedParams{
 			MessageID:      newMessage.ID,
 			RecipientID:    newMessage.RecipientID,
 			RecipientEmail: newMessage.RecipientEmail,

@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const findUserReadModelByID = `-- name: FindUserReadModelByID :one
+const getUserReadModelByID = `-- name: GetUserReadModelByID :one
 SELECT
   u.id,
   u.email,
@@ -31,7 +31,7 @@ WHERE
   AND u.deleted_at IS NULL
 `
 
-type FindUserReadModelByIDRow struct {
+type GetUserReadModelByIDRow struct {
 	ID              uuid.UUID
 	Email           string
 	CreatedAt       time.Time
@@ -41,9 +41,9 @@ type FindUserReadModelByIDRow struct {
 	LastName        sql.NullString
 }
 
-func (q *Queries) FindUserReadModelByID(ctx context.Context, id uuid.UUID) (FindUserReadModelByIDRow, error) {
-	row := q.db.QueryRowContext(ctx, findUserReadModelByID, id)
-	var i FindUserReadModelByIDRow
+func (q *Queries) GetUserReadModelByID(ctx context.Context, id uuid.UUID) (GetUserReadModelByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserReadModelByID, id)
+	var i GetUserReadModelByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,

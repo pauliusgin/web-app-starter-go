@@ -146,7 +146,7 @@ type awaitHealthyServerParams struct {
 func awaitHealthyServer(t *testing.T, params awaitHealthyServerParams) {
 	t.Helper()
 
-	healthURL := "http://" + serverAddress(params.Port) + routes.HealthPath
+	healthURL := "http://" + serverAddress(params.Port) + routes.HealthRoutePath
 	deadline := time.Now().Add(serverStartupTimeout)
 
 	for time.Now().Before(deadline) {
@@ -274,7 +274,7 @@ func TestRunServerReportsFailedStartupStep(t *testing.T) {
 			name:                    "scheduler",
 			needsLiveInfrastructure: true,
 			breakStep: func(s *startupSteps) {
-				s.BuildScheduler = func(schedulerParams) (scheduler.Scheduler, error) {
+				s.BuildScheduler = func(buildSchedulerParams) (scheduler.Scheduler, error) {
 					return scheduler.Scheduler{}, errStartupStepFailed
 				}
 			},

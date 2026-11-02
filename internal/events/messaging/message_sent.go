@@ -17,8 +17,8 @@ type messageSentData struct {
 	ReferenceID    string    `json:"referenceId"`
 }
 
-// MessageSentParams is the logged message a message.sent event carries.
-type MessageSentParams struct {
+// NewMessageSentParams is the logged message a message.sent event carries.
+type NewMessageSentParams struct {
 	MessageID      uuid.UUID
 	RecipientID    uuid.UUID
 	RecipientEmail string
@@ -27,8 +27,8 @@ type MessageSentParams struct {
 	ReferenceID    string
 }
 
-// MessageSent builds the event announcing a message the delivery provider accepted.
-func MessageSent(params MessageSentParams) (events.NewEvent, error) {
+// NewMessageSent builds the event announcing a message the delivery provider accepted.
+func NewMessageSent(params NewMessageSentParams) (events.NewEvent, error) {
 	return events.New(events.NewEventParams{
 		Label:  events.MessageSentLabel,
 		UserID: uuid.NullUUID{UUID: params.RecipientID, Valid: true},
@@ -44,8 +44,8 @@ func MessageSent(params MessageSentParams) (events.NewEvent, error) {
 }
 
 // DispatchMessageSent builds, records and publishes the event announcing an accepted message.
-func DispatchMessageSent(ctx context.Context, dispatcher events.Dispatcher, params MessageSentParams) {
+func DispatchMessageSent(ctx context.Context, dispatcher events.Dispatcher, params NewMessageSentParams) {
 	dispatcher.Dispatch(ctx, func() (events.NewEvent, error) {
-		return MessageSent(params)
+		return NewMessageSent(params)
 	})
 }

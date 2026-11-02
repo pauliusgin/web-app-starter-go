@@ -24,7 +24,7 @@ func emailVerificationParams(userID uuid.UUID) GenerateParams {
 }
 
 func TestGenerateStoresTheHashOfTheTokenTheEventCarries(t *testing.T) {
-	store := newInMemoryChallengeStore()
+	store := NewInMemoryChallengeRepository()
 	captured := &capturedEvents{}
 	userID := uuid.New()
 
@@ -38,7 +38,7 @@ func TestGenerateStoresTheHashOfTheTokenTheEventCarries(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	storedChallenges := store.challengesForUser(userID)
+	storedChallenges := challengesForUser(store, userID)
 	if len(storedChallenges) != 1 {
 		t.Fatalf("stored rows = %d, want 1", len(storedChallenges))
 	}
@@ -62,7 +62,7 @@ func TestGenerateStoresTheHashOfTheTokenTheEventCarries(t *testing.T) {
 }
 
 func TestGenerateExpiresOneLifetimeAfterCreation(t *testing.T) {
-	store := newInMemoryChallengeStore()
+	store := NewInMemoryChallengeRepository()
 	captured := &capturedEvents{}
 	userID := uuid.New()
 
@@ -86,7 +86,7 @@ func TestGenerateExpiresOneLifetimeAfterCreation(t *testing.T) {
 }
 
 func TestGenerateKeepsTheTokenOutOfTheRecordedPayload(t *testing.T) {
-	store := newInMemoryChallengeStore()
+	store := NewInMemoryChallengeRepository()
 	captured := &capturedEvents{}
 	userID := uuid.New()
 
@@ -155,7 +155,7 @@ func TestGenerateRejectsAnIncompleteRequestBeforeMintingAnything(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			store := newInMemoryChallengeStore()
+			store := NewInMemoryChallengeRepository()
 			captured := &capturedEvents{}
 			params := emailVerificationParams(userID)
 			testCase.mutate(&params)
@@ -170,12 +170,12 @@ func TestGenerateRejectsAnIncompleteRequestBeforeMintingAnything(t *testing.T) {
 			if !testCase.isWantedErr(err) {
 				t.Fatalf("error = %v, want %s", err, testCase.wantErrName)
 			}
-			if generated != (Generated{}) {
+			if generated != (GenerateResult{}) {
 				t.Errorf("generated = %+v, want the zero value on failure", generated)
 			}
-			if len(store.rows) != 0 {
+			if len(store.Challenges) != 0 {
 				t.Errorf("stored rows = %d, want nothing stored for a bad request",
-					len(store.rows))
+					len(store.Challenges))
 			}
 			if len(captured.recorded) != 0 || len(captured.published) != 0 {
 				t.Errorf("recorded %d and published %d events, want none for a bad request",
@@ -188,8 +188,8 @@ func TestGenerateRejectsAnIncompleteRequestBeforeMintingAnything(t *testing.T) {
 func TestGeneratePassesAStorageFailureThroughAndAnnouncesNothing(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	saveFailure := ErrSaveChallengeFailed{Cause: cause}
-	store := newInMemoryChallengeStore()
-	store.saveFailure = saveFailure
+	store := NewInMemoryChallengeRepository()
+	store.SaveFailure = saveFailure
 	captured := &capturedEvents{}
 
 	generated, err := Generate(context.Background(),
@@ -207,11 +207,11 @@ func TestGeneratePassesAStorageFailureThroughAndAnnouncesNothing(t *testing.T) {
 	if !errors.As(err, &saveFailed) {
 		t.Fatalf("error = %v, want ErrSaveChallengeFailed", err)
 	}
-	if generated != (Generated{}) {
+	if generated != (GenerateResult{}) {
 		t.Errorf("generated = %+v, want the zero value on failure", generated)
 	}
-	if len(store.rows) != 0 {
-		t.Errorf("stored rows = %d, want nothing stored when the insert fails", len(store.rows))
+	if len(store.Challenges) != 0 {
+		t.Errorf("stored rows = %d, want nothing stored when the insert fails", len(store.Challenges))
 	}
 	if len(captured.recorded) != 0 || len(captured.published) != 0 {
 		t.Errorf("recorded %d and published %d events, want none when the insert fails",

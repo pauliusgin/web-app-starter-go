@@ -12,10 +12,10 @@ const bearerTokenExpectationText = "expected \"Bearer <token>\": one space, and 
 const accessTokenRejectedText = "the access token was rejected"
 const authenticatedUserNotFoundText = "the access token names a user that no longer exists"
 
-// ErrAuthorizationHeaderAbsent reports a request that carried no Authorization header.
-type ErrAuthorizationHeaderAbsent struct{}
+// ErrAuthorizationHeaderMissing reports a request that carried no Authorization header.
+type ErrAuthorizationHeaderMissing struct{}
 
-func (e ErrAuthorizationHeaderAbsent) Error() string {
+func (e ErrAuthorizationHeaderMissing) Error() string {
 	return fmt.Sprintf("missing Authorization header: %s", authorizationHeaderExpectationText)
 }
 

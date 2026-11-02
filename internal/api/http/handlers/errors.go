@@ -37,11 +37,11 @@ func (e ErrRequestBodyTooLarge) Error() string {
 	return fmt.Sprintf("the request body is larger than the %d byte limit", e.Limit)
 }
 
-// ErrUnsupportedContentType reports a request whose Content-Type is not application/json.
-type ErrUnsupportedContentType struct {
+// ErrContentTypeUnsupported reports a request whose Content-Type is not application/json.
+type ErrContentTypeUnsupported struct {
 	ContentType string
 }
 
-func (e ErrUnsupportedContentType) Error() string {
+func (e ErrContentTypeUnsupported) Error() string {
 	return fmt.Sprintf("unsupported Content-Type %q: expected %s", e.ContentType, jsonMediaType)
 }

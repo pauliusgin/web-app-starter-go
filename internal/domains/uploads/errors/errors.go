@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const findUploadFailedText = "failed finding the upload"
+const uploadNotFoundText = "expected an upload owned by the user"
 const uploadPurposeUnknownText = "expected one of the known upload purposes"
 const uploadFilesMissingText = "expected at least one file"
 const tooManyUploadFilesText = "expected no more files than the upload purpose accepts per request"
@@ -202,5 +204,28 @@ func (e ErrDeleteUploadFailed) Error() string {
 }
 
 func (e ErrDeleteUploadFailed) Unwrap() error {
+	return e.Cause
+}
+
+// ErrUploadNotFound reports an upload that is missing or owned by someone else.
+type ErrUploadNotFound struct {
+	ID uuid.UUID
+}
+
+func (e ErrUploadNotFound) Error() string {
+	return fmt.Sprintf("%s, got %s", uploadNotFoundText, e.ID)
+}
+
+// ErrFindUploadFailed reports an upload lookup the database could not complete.
+type ErrFindUploadFailed struct {
+	ID    uuid.UUID
+	Cause error
+}
+
+func (e ErrFindUploadFailed) Error() string {
+	return fmt.Sprintf("%s %s: %s", findUploadFailedText, e.ID, e.Cause)
+}
+
+func (e ErrFindUploadFailed) Unwrap() error {
 	return e.Cause
 }

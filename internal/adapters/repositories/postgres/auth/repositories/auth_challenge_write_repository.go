@@ -25,24 +25,12 @@ func NewAuthChallengeWriteRepository(queries *sqlc.Queries) AuthChallengeWriteRe
 	return AuthChallengeWriteRepository{queries: queries}
 }
 
-// Save inserts the auth challenge and returns the row the database produced.
-func (r AuthChallengeWriteRepository) Save(
+// SaveChallenge inserts the auth challenge and returns the row the database produced.
+func (r AuthChallengeWriteRepository) SaveChallenge(
 	ctx context.Context,
 	newChallenge challenge.NewChallenge,
 ) (challenge.Challenge, error) {
-	row, err := r.queries.CreateAuthChallenge(ctx, sqlc.CreateAuthChallengeParams{
-		ID:          newChallenge.ID,
-		UserID:      newChallenge.UserID,
-		TargetType:  string(newChallenge.TargetType),
-		Target:      newChallenge.Target,
-		Purpose:     string(newChallenge.Purpose),
-		TokenHash:   sql.NullString{String: newChallenge.TokenHash, Valid: true},
-		Code:        sql.NullString{},
-		Provider:    sql.NullString{},
-		ReferenceID: sql.NullString{},
-		CreatedAt:   time.Now(),
-		ExpiresAt:   newChallenge.ExpiresAt,
-	})
+	row, err := r.queries.CreateAuthChallenge(ctx, mappers.CreateAuthChallengeParamsMapper(newChallenge, time.Now()))
 	if err != nil {
 		return challenge.Challenge{}, challenge.ErrSaveChallengeFailed{Cause: err}
 	}

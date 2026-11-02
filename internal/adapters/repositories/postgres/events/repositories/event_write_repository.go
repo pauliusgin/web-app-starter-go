@@ -1,5 +1,5 @@
-// Package postgres adapts the generated sqlc queries to the event log write port.
-package postgres
+// Package repositories adapts the generated sqlc queries to the event log write port.
+package repositories
 
 import (
 	"context"
@@ -21,14 +21,9 @@ func NewEventWriteRepository(queries *sqlc.Queries) EventWriteRepository {
 	return EventWriteRepository{queries: queries}
 }
 
-// Save inserts the event and returns the row the database produced.
-func (r EventWriteRepository) Save(ctx context.Context, newEvent events.NewEvent) (events.Event, error) {
-	row, err := r.queries.RecordEvent(ctx, sqlc.RecordEventParams{
-		ID:         newEvent.ID,
-		UserID:     newEvent.UserID,
-		EventLabel: string(newEvent.Label),
-		EventData:  newEvent.Data,
-	})
+// SaveEvent inserts the event and returns the row the database produced.
+func (r EventWriteRepository) SaveEvent(ctx context.Context, newEvent events.NewEvent) (events.Event, error) {
+	row, err := r.queries.RecordEvent(ctx, mappers.RecordEventParamsMapper(newEvent))
 	if err != nil {
 		return events.Event{}, events.ErrRecordEventFailed{Label: newEvent.Label, Cause: err}
 	}

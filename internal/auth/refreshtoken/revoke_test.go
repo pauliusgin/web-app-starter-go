@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func revokeForTest(t *testing.T, store *inMemoryTokenStore, presentedToken string) error {
+func revokeForTest(t *testing.T, store *InMemoryRefreshTokenRepository, presentedToken string) error {
 	t.Helper()
 
 	return Revoke(context.Background(),
@@ -19,22 +19,22 @@ func revokeForTest(t *testing.T, store *inMemoryTokenStore, presentedToken strin
 func TestRevokeRefreshTokenRevokesALiveToken(t *testing.T) {
 	store := newInMemoryTokenStore()
 	userID := uuid.New()
-	presentedToken := store.seedToken(t, seedTokenParams{UserID: userID})
-	otherSessionToken := store.seedToken(t, seedTokenParams{UserID: userID})
+	presentedToken := seedToken(t, store, seedTokenParams{UserID: userID})
+	otherSessionToken := seedToken(t, store, seedTokenParams{UserID: userID})
 
 	if err := revokeForTest(t, store, presentedToken); err != nil {
 		t.Fatalf("RevokeRefreshToken: %v", err)
 	}
 
-	if !store.tokenByPlaintext(t, presentedToken).IsRevoked() {
+	if !tokenByPlaintext(t, store, presentedToken).IsRevoked() {
 		t.Error("the presented token is still live, want it revoked")
 	}
-	if store.tokenByPlaintext(t, otherSessionToken).IsRevoked() {
+	if tokenByPlaintext(t, store, otherSessionToken).IsRevoked() {
 		t.Error("the user's other session was revoked, want logout to end only one session")
 	}
-	if len(store.tokensForUser(userID)) != 2 {
+	if len(tokensForUser(store, userID)) != 2 {
 		t.Errorf("rows for the user = %d, want logout to stamp rather than delete",
-			len(store.tokensForUser(userID)))
+			len(tokensForUser(store, userID)))
 	}
 }
 
@@ -43,12 +43,12 @@ func TestRevokeRefreshTokenSurfacesAFailedLookup(t *testing.T) {
 
 	testCases := []struct {
 		name         string
-		arrangeStore func(t *testing.T, store *inMemoryTokenStore) string
+		arrangeStore func(t *testing.T, store *InMemoryRefreshTokenRepository) string
 		assertError  func(t *testing.T, err error)
 	}{
 		{
 			name: "unknown token",
-			arrangeStore: func(t *testing.T, store *inMemoryTokenStore) string {
+			arrangeStore: func(t *testing.T, store *InMemoryRefreshTokenRepository) string {
 				return "never-issued-refresh-token"
 			},
 			assertError: func(t *testing.T, err error) {
@@ -60,9 +60,9 @@ func TestRevokeRefreshTokenSurfacesAFailedLookup(t *testing.T) {
 		},
 		{
 			name: "lookup failed",
-			arrangeStore: func(t *testing.T, store *inMemoryTokenStore) string {
-				store.lookupFailure = ErrRefreshTokenLookupFailed{Cause: cause}
-				return store.seedToken(t, seedTokenParams{UserID: uuid.New()})
+			arrangeStore: func(t *testing.T, store *InMemoryRefreshTokenRepository) string {
+				store.FindFailure = ErrRefreshTokenLookupFailed{Cause: cause}
+				return seedToken(t, store, seedTokenParams{UserID: uuid.New()})
 			},
 			assertError: func(t *testing.T, err error) {
 				lookupFailed := ErrRefreshTokenLookupFailed{}
@@ -84,7 +84,7 @@ func TestRevokeRefreshTokenSurfacesAFailedLookup(t *testing.T) {
 			err := revokeForTest(t, store, presentedToken)
 
 			testCase.assertError(t, err)
-			for _, storedToken := range store.rows {
+			for _, storedToken := range store.Tokens {
 				if storedToken.IsRevoked() {
 					t.Error("a stored token was revoked, want a failed lookup to revoke nothing")
 				}
@@ -96,8 +96,8 @@ func TestRevokeRefreshTokenSurfacesAFailedLookup(t *testing.T) {
 func TestRevokeRefreshTokenSurfacesARevokeFailureUnchanged(t *testing.T) {
 	cause := errors.New("pq: connection refused")
 	store := newInMemoryTokenStore()
-	presentedToken := store.seedToken(t, seedTokenParams{UserID: uuid.New()})
-	store.revokeFailure = ErrRevokeRefreshTokenFailed{Cause: cause}
+	presentedToken := seedToken(t, store, seedTokenParams{UserID: uuid.New()})
+	store.RevokeFailure = ErrRevokeRefreshTokenFailed{Cause: cause}
 
 	err := revokeForTest(t, store, presentedToken)
 
@@ -108,7 +108,7 @@ func TestRevokeRefreshTokenSurfacesARevokeFailureUnchanged(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Error("the revoke failure does not unwrap to the driver error")
 	}
-	if store.tokenByPlaintext(t, presentedToken).IsRevoked() {
+	if tokenByPlaintext(t, store, presentedToken).IsRevoked() {
 		t.Error("the presented token was revoked, want it left live on failure")
 	}
 }

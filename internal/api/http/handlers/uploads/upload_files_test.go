@@ -20,9 +20,10 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/imaging"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/storage"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/models"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/repositories"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/queries"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
 	usermodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 )
@@ -64,16 +65,19 @@ func newUploadFilesHarness(t *testing.T) uploadFilesHarness {
 func (h uploadFilesHarness) handler() http.Handler {
 	ignoreEvent := func(context.Context, events.NewEvent) error { return nil }
 	dependencies := usecases.UploadFilesDependencies{
-		UploadRepository: h.repository,
-		FileStorage:      h.fileStorage,
-		ImageProcessor:   h.imageProcessor,
-		EventDispatcher:  events.Dispatcher{Recorder: ignoreEvent, Publisher: ignoreEvent},
-		AppEnv:           "test",
+		UploadWriteRepository: h.repository,
+		FileStorage:           h.fileStorage,
+		ImageProcessor:        h.imageProcessor,
+		EventDispatcher:       events.Dispatcher{Recorder: ignoreEvent, Publisher: ignoreEvent},
+		AppEnv:                "test",
 	}
 
 	return UploadFiles(UploadFilesDependencies{
 		UploadFiles: func(ctx context.Context, params usecases.UploadFilesParams) (usecases.UploadFilesResult, error) {
 			return usecases.UploadFiles(ctx, dependencies, params)
+		},
+		GetUploadsByIDs: func(ctx context.Context, params queries.GetUploadsByIDsParams) (queries.GetUploadsByIDsResult, error) {
+			return queries.GetUploadsByIDs(ctx, queries.GetUploadsByIDsDependencies{UploadReadRepository: h.repository}, params)
 		},
 	})
 }

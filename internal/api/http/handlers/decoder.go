@@ -45,7 +45,7 @@ func DecodeRequest[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 var RequestDecodingRules = []RejectionRule{
 	RejectWhen[ErrJSONRequestBodyUndecodable](Rejection{Status: http.StatusBadRequest, Code: ErrorCodeRequestBodyInvalid}),
 	RejectWhen[ErrRequestBodyTooLarge](Rejection{Status: http.StatusRequestEntityTooLarge, Code: ErrorCodeRequestBodyTooLarge}),
-	RejectWhen[ErrUnsupportedContentType](Rejection{Status: http.StatusUnsupportedMediaType, Code: ErrorCodeUnsupportedContentType}),
+	RejectWhen[ErrContentTypeUnsupported](Rejection{Status: http.StatusUnsupportedMediaType, Code: ErrorCodeUnsupportedContentType}),
 }
 
 func requireJSONContentType(r *http.Request) error {
@@ -53,7 +53,7 @@ func requireJSONContentType(r *http.Request) error {
 
 	mediaType, _, err := mime.ParseMediaType(rawContentType)
 	if err != nil || mediaType != jsonMediaType {
-		return ErrUnsupportedContentType{ContentType: rawContentType}
+		return ErrContentTypeUnsupported{ContentType: rawContentType}
 	}
 
 	return nil

@@ -1,4 +1,4 @@
--- name: FindUserReadModelByID :one
+-- name: GetUserReadModelByID :one
 SELECT
   u.id,
   u.email,

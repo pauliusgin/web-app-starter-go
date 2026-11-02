@@ -16,9 +16,10 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/models"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/repositories"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/usecases"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/models"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 	usermodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 )
@@ -49,28 +50,38 @@ func ignoringDispatcher() events.Dispatcher {
 
 func createProfileHandler(repository *repositories.InMemoryProfileRepository) http.Handler {
 	dependencies := usecases.CreateProfileDependencies{
-		ProfileRepository: repository,
-		EventDispatcher:   ignoringDispatcher(),
+		ProfileWriteRepository: repository,
+		EventDispatcher:        ignoringDispatcher(),
 	}
 
 	return CreateProfile(CreateProfileDependencies{
 		CreateProfile: func(ctx context.Context, params usecases.CreateProfileParams) (usecases.CreateProfileResult, error) {
 			return usecases.CreateProfile(ctx, dependencies, params)
 		},
+		GetProfileByID: profileReader(repository),
 	})
 }
 
 func updateProfileHandler(repository *repositories.InMemoryProfileRepository) http.Handler {
 	dependencies := usecases.UpdateProfileDependencies{
-		ProfileRepository: repository,
-		EventDispatcher:   ignoringDispatcher(),
+		ProfileWriteRepository: repository,
+		EventDispatcher:        ignoringDispatcher(),
 	}
 
 	return UpdateProfile(UpdateProfileDependencies{
 		UpdateProfile: func(ctx context.Context, params usecases.UpdateProfileParams) (usecases.UpdateProfileResult, error) {
 			return usecases.UpdateProfile(ctx, dependencies, params)
 		},
+		GetProfileByID: profileReader(repository),
 	})
+}
+
+func profileReader(repository *repositories.InMemoryProfileRepository) GetProfileByIDUseCase {
+	dependencies := queries.GetProfileByIDDependencies{ProfileReadRepository: repository}
+
+	return func(ctx context.Context, params queries.GetProfileByIDParams) (queries.GetProfileByIDResult, error) {
+		return queries.GetProfileByID(ctx, dependencies, params)
+	}
 }
 
 func authenticateForTest(userID uuid.UUID) func(http.Handler) http.Handler {

@@ -18,3 +18,13 @@ func EventMapper(row sqlc.EventLog) events.Event {
 
 	return mapped
 }
+
+// RecordEventParamsMapper maps a new event onto the RecordEvent insert parameters.
+func RecordEventParamsMapper(newEvent events.NewEvent) sqlc.RecordEventParams {
+	return sqlc.RecordEventParams{
+		ID:         newEvent.ID,
+		UserID:     newEvent.UserID,
+		EventLabel: string(newEvent.Label),
+		EventData:  newEvent.Data,
+	}
+}

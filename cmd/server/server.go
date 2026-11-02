@@ -29,7 +29,7 @@ type startupSteps struct {
 	BuildFileStorage        func(firebaseConfig config.FirebaseConfig) (fileStorageResource, error)
 	BuildImageProcessor     func() (imageProcessorResource, error)
 	StartEventConsumers     func(params startEventConsumersParams) (func(), error)
-	BuildScheduler          func(params schedulerParams) (scheduler.Scheduler, error)
+	BuildScheduler          func(params buildSchedulerParams) (scheduler.Scheduler, error)
 	BuildRouterDependencies func(params buildRouterDependenciesParams) (routes.RouterDependencies, error)
 	ListenTCP               func(network string, address string) (net.Listener, error)
 }
@@ -112,7 +112,7 @@ func runServer(s startupSteps) error {
 
 	defer stopEventConsumers()
 
-	jobScheduler, err := s.BuildScheduler(schedulerParams{
+	jobScheduler, err := s.BuildScheduler(buildSchedulerParams{
 		Database:       db,
 		Logger:         slog.Default(),
 		EventPublisher: broker.Publisher,

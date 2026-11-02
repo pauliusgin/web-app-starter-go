@@ -5,23 +5,23 @@ import (
 	"net/http"
 )
 
-// RouterDependencies carries the collaborators each sub-router hands to its handlers.
+// RouterDependencies carries the collaborators each group of routes hands to its handlers.
 type RouterDependencies struct {
-	Users    UserRouterDependencies
-	Auth     AuthRouterDependencies
-	Uploads  UploadRouterDependencies
-	Profiles ProfileRouterDependencies
+	Users    UserRoutesDependencies
+	Auth     TokenRoutesDependencies
+	Uploads  UploadRoutesDependencies
+	Profiles ProfileRoutesDependencies
 }
 
-// BuildRouter returns the router with every sub-router of the API mounted under its own prefix.
+// BuildRouter returns one mux holding every API route under its full pattern.
 func BuildRouter(dependencies RouterDependencies) http.Handler {
 	mux := &http.ServeMux{}
 
-	mux.Handle(HealthPath, HealthRouter())
-	mux.Handle(UserRoutePrefix, UserRouter(dependencies.Users))
-	mux.Handle(AuthRoutePrefix, AuthRouter(dependencies.Auth))
-	mux.Handle(UploadRoutePath, UploadRouter(dependencies.Uploads))
-	mux.Handle(ProfileRoutePath, ProfileRouter(dependencies.Profiles))
+	RegisterHealthRoutes(mux)
+	RegisterUserRoutes(mux, dependencies.Users)
+	RegisterTokenRoutes(mux, dependencies.Auth)
+	RegisterUploadRoutes(mux, dependencies.Uploads)
+	RegisterProfileRoutes(mux, dependencies.Profiles)
 
 	return mux
 }

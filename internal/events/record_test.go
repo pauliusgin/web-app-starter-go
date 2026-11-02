@@ -23,7 +23,7 @@ type inMemoryEventLog struct {
 	failure        error
 }
 
-func (l *inMemoryEventLog) Save(_ context.Context, newEvent NewEvent) (Event, error) {
+func (l *inMemoryEventLog) SaveEvent(_ context.Context, newEvent NewEvent) (Event, error) {
 	if l.failure != nil {
 		return Event{}, l.failure
 	}

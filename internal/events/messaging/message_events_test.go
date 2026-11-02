@@ -46,7 +46,7 @@ func TestMessageSentCarriesTheMessageAndTheProviderReference(t *testing.T) {
 	messageID := uuid.New()
 	recipientID := uuid.New()
 
-	sent, err := MessageSent(MessageSentParams{
+	sent, err := NewMessageSent(NewMessageSentParams{
 		MessageID:      messageID,
 		RecipientID:    recipientID,
 		RecipientEmail: testRecipientEmail,
@@ -77,7 +77,7 @@ func TestMessageFailedCarriesTheMessageAndItsErrors(t *testing.T) {
 	messageID := uuid.New()
 	recipientID := uuid.New()
 
-	failed, err := MessageFailed(MessageFailedParams{
+	failed, err := NewMessageFailed(NewMessageFailedParams{
 		MessageID:      messageID,
 		RecipientID:    recipientID,
 		RecipientEmail: testRecipientEmail,

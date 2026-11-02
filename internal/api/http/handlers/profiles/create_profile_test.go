@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	e "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/repositories"
 )
 
 func TestCreateProfileAnswersCreatedWithTheTrimmedProfile(t *testing.T) {

@@ -8,94 +8,56 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/password"
-	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	user "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
+	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 const replacementPassword = "new-ledger-password-2026"
 
 type changePasswordForTest struct {
-	dependencies ChangePasswordDependencies
-	store        *inMemoryUserStore
-	eventLog     *inMemoryEventLog
-	broker       *inMemoryBroker
-	userID       uuid.UUID
-	storedHash   string
+	users      *repositories.InMemoryUserRepository
+	events     *eventstest.CapturedEvents
+	userID     uuid.UUID
+	seededHash string
 }
 
 func newChangePasswordForTest(t *testing.T) changePasswordForTest {
 	t.Helper()
 
-	storedHash, err := password.Hash(testPassword)
-	if err != nil {
-		t.Fatalf("hashing the seeded password: %v", err)
-	}
-
-	store := newInMemoryUserStore()
-	userID := uuid.New()
-	store.savedUsers = append(store.savedUsers, user.NewUser{
-		ID:           userID,
-		Email:        testEmail,
-		PasswordHash: storedHash,
-	})
-
-	eventLog := newInMemoryEventLog()
-	broker := newInMemoryBroker()
-	recorder := func(ctx context.Context, event events.NewEvent) error {
-		_, err := events.Record(ctx, events.RecordDependencies{EventWriteRepository: eventLog}, event)
-		return err
-	}
+	users := repositories.NewInMemoryUserRepository()
+	userID := seedUser(t, users, seedUserParams{email: testEmail, password: testPassword})
 
 	return changePasswordForTest{
-		dependencies: ChangePasswordDependencies{
-			UserWriteRepository: store,
-			EventDispatcher:     events.Dispatcher{Recorder: recorder, Publisher: broker.publish},
-		},
-		store:      store,
-		eventLog:   eventLog,
-		broker:     broker,
+		users:      users,
+		events:     &eventstest.CapturedEvents{},
 		userID:     userID,
-		storedHash: storedHash,
+		seededHash: storedUser(t, users, userID).PasswordHash,
 	}
 }
 
 func (h changePasswordForTest) change(params ChangePasswordParams) error {
-	return ChangePassword(context.Background(), h.dependencies, params)
+	return ChangePassword(context.Background(), ChangePasswordDependencies{
+		UserWriteRepository: h.users,
+		EventDispatcher:     h.events.Dispatcher(),
+	}, params)
 }
 
 func (h changePasswordForTest) validParams() ChangePasswordParams {
-	return ChangePasswordParams{
-		UserID:          h.userID,
-		CurrentPassword: testPassword,
-		NewPassword:     replacementPassword,
-	}
+	return ChangePasswordParams{UserID: h.userID, CurrentPassword: testPassword, NewPassword: replacementPassword}
 }
 
-func (h changePasswordForTest) currentStoredHash(t *testing.T) string {
+func (h changePasswordForTest) assertPasswordNotChanged(t *testing.T) {
 	t.Helper()
 
-	credentials, err := h.store.FindUserCredentialsByID(context.Background(), h.userID)
-	if err != nil {
-		t.Fatalf("finding the user's credentials: %v", err)
-	}
-
-	return credentials.PasswordHash
-}
-
-func assertPasswordNotChanged(t *testing.T, harness changePasswordForTest) {
-	t.Helper()
-
-	if harness.currentStoredHash(t) != harness.storedHash {
+	if storedUser(t, h.users, h.userID).PasswordHash != h.seededHash {
 		t.Error("stored hash changed, want it left untouched for a rejected password change")
 	}
-	if len(harness.eventLog.recordedEvents) != 0 || len(harness.broker.publishedEvents) != 0 {
-		t.Errorf("recorded/published events = %d/%d, want none for a rejected password change",
-			len(harness.eventLog.recordedEvents), len(harness.broker.publishedEvents))
-	}
+	h.events.AssertNoneDispatched(t)
 }
 
-func storedHashMatches(t *testing.T, storedHash string, candidatePassword string) bool {
+func hashVerifies(t *testing.T, storedHash string, candidatePassword string) bool {
 	t.Helper()
 
 	matches, err := password.Verify(password.VerificationParams{Password: candidatePassword, Hash: storedHash})
@@ -106,135 +68,91 @@ func storedHashMatches(t *testing.T, storedHash string, candidatePassword string
 	return matches
 }
 
-func TestChangePasswordStoresAHashOfTheNewPassword(t *testing.T) {
+func TestChangePasswordStoresAHashOfTheNewPasswordAndAnnouncesIt(t *testing.T) {
 	harness := newChangePasswordForTest(t)
 
 	if err := harness.change(harness.validParams()); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
 	}
 
-	updatedHash := harness.currentStoredHash(t)
-	if !storedHashMatches(t, updatedHash, replacementPassword) {
-		t.Error("stored hash does not verify the new password")
+	updatedHash := storedUser(t, harness.users, harness.userID).PasswordHash
+	if !hashVerifies(t, updatedHash, replacementPassword) || hashVerifies(t, updatedHash, testPassword) {
+		t.Error("stored hash does not verify only the new password")
 	}
-	if storedHashMatches(t, updatedHash, testPassword) {
-		t.Error("stored hash still verifies the old password")
-	}
+	harness.events.OnlyDispatchedBy(t, eventstest.DispatchedBy{Label: events.UserPasswordChangedLabel, UserID: harness.userID})
 }
 
-func TestChangePasswordAnnouncesTheChangeWithOnlyTheUserID(t *testing.T) {
-	harness := newChangePasswordForTest(t)
-
-	if err := harness.change(harness.validParams()); err != nil {
-		t.Fatalf("ChangePassword: %v", err)
+func TestChangePasswordRejectsWithoutChangingAnything(t *testing.T) {
+	cases := []struct {
+		name    string
+		change  func(params *ChangePasswordParams)
+		wantErr func(err error) bool
+	}{
+		{
+			name:    "incorrect current password",
+			change:  func(params *ChangePasswordParams) { params.CurrentPassword = "not-the-current-password" },
+			wantErr: isError[e.ErrCurrentPasswordIncorrect],
+		},
+		{
+			name:    "new password equal to the current one",
+			change:  func(params *ChangePasswordParams) { params.NewPassword = testPassword },
+			wantErr: isError[e.ErrPasswordUnchanged],
+		},
+		{
+			// Checking the guess first stops a caller probing a password through ErrPasswordUnchanged.
+			name: "incorrect guess equal to the new password",
+			change: func(params *ChangePasswordParams) {
+				params.CurrentPassword = "wrong-guess-password"
+				params.NewPassword = "wrong-guess-password"
+			},
+			wantErr: isError[e.ErrCurrentPasswordIncorrect],
+		},
+		{
+			name:    "unknown user",
+			change:  func(params *ChangePasswordParams) { params.UserID = uuid.New() },
+			wantErr: isError[e.ErrUserNotFound],
+		},
 	}
 
-	if len(harness.eventLog.recordedEvents) != 1 {
-		t.Fatalf("recorded events = %d, want 1", len(harness.eventLog.recordedEvents))
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			harness := newChangePasswordForTest(t)
+			params := harness.validParams()
+			testCase.change(&params)
+
+			err := harness.change(params)
+
+			if !testCase.wantErr(err) {
+				t.Fatalf("error = %#v, want the case's rejection", err)
+			}
+			harness.assertPasswordNotChanged(t)
+		})
 	}
-	recorded := harness.eventLog.recordedEvents[0]
-	if recorded.Label != events.UserPasswordChangedLabel {
-		t.Errorf("Label = %q, want %q", recorded.Label, events.UserPasswordChangedLabel)
-	}
-	if recorded.UserID != (uuid.NullUUID{UUID: harness.userID, Valid: true}) {
-		t.Errorf("UserID = %+v, want %s", recorded.UserID, harness.userID)
-	}
-	if len(harness.broker.publishedEvents) != 1 {
-		t.Errorf("published events = %d, want 1", len(harness.broker.publishedEvents))
-	}
-}
-
-func TestChangePasswordRejectsAnIncorrectCurrentPassword(t *testing.T) {
-	harness := newChangePasswordForTest(t)
-	params := harness.validParams()
-	params.CurrentPassword = "not-the-current-password"
-
-	err := harness.change(params)
-
-	if !errors.As(err, &usererrors.ErrCurrentPasswordIncorrect{}) {
-		t.Fatalf("error = %v, want ErrCurrentPasswordIncorrect", err)
-	}
-	assertPasswordNotChanged(t, harness)
-}
-
-func TestChangePasswordRejectsANewPasswordEqualToTheCurrentOne(t *testing.T) {
-	harness := newChangePasswordForTest(t)
-	params := harness.validParams()
-	params.NewPassword = testPassword
-
-	err := harness.change(params)
-
-	if !errors.As(err, &usererrors.ErrPasswordUnchanged{}) {
-		t.Fatalf("error = %v, want ErrPasswordUnchanged", err)
-	}
-	assertPasswordNotChanged(t, harness)
-}
-
-func TestChangePasswordReportsIncorrectBeforeUnchanged(t *testing.T) {
-	harness := newChangePasswordForTest(t)
-	params := harness.validParams()
-	params.CurrentPassword = "wrong-guess-password"
-	params.NewPassword = testPassword
-
-	err := harness.change(params)
-
-	if !errors.As(err, &usererrors.ErrCurrentPasswordIncorrect{}) {
-		t.Fatalf("error = %v, want ErrCurrentPasswordIncorrect so a guess cannot be probed via unchanged", err)
-	}
-	assertPasswordNotChanged(t, harness)
-}
-
-func TestChangePasswordReportsAnUnknownUser(t *testing.T) {
-	harness := newChangePasswordForTest(t)
-	params := harness.validParams()
-	params.UserID = uuid.New()
-
-	err := harness.change(params)
-
-	if !errors.As(err, &usererrors.ErrUserNotFound{}) {
-		t.Fatalf("error = %v, want ErrUserNotFound", err)
-	}
-	assertPasswordNotChanged(t, harness)
 }
 
 func TestChangePasswordReportsAnUnreadableStoredHash(t *testing.T) {
 	harness := newChangePasswordForTest(t)
-	harness.store.savedUsers[0].PasswordHash = seededHash
-	harness.storedHash = seededHash
+	stored := storedUser(t, harness.users, harness.userID)
+	stored.PasswordHash = unreadableHash
+	harness.users.Users[harness.userID] = stored
+	harness.seededHash = unreadableHash
 
 	err := harness.change(harness.validParams())
 
-	if !errors.As(err, &usererrors.ErrPasswordVerificationFailed{}) {
+	if !errors.As(err, &e.ErrPasswordVerificationFailed{}) {
 		t.Fatalf("error = %v, want ErrPasswordVerificationFailed", err)
 	}
-	assertPasswordNotChanged(t, harness)
+	harness.assertPasswordNotChanged(t)
 }
 
-func TestChangePasswordPropagatesALookupFailure(t *testing.T) {
+func TestChangePasswordAnnouncesNothingWhenTheNewHashIsNotStored(t *testing.T) {
 	harness := newChangePasswordForTest(t)
-	lookupFailure := usererrors.ErrIDLookupFailed{Cause: errors.New("pq: connection refused")}
-	harness.store.lookupFailure = lookupFailure
+	harness.users.ChangePasswordFailure = e.ErrChangePasswordFailed{Cause: errors.New("connection refused")}
 
 	err := harness.change(harness.validParams())
 
-	if err != lookupFailure {
-		t.Fatalf("error = %#v, want the repository's own error passed through unchanged", err)
+	if !errors.As(err, &e.ErrChangePasswordFailed{}) {
+		t.Fatalf("error = %v, want ErrChangePasswordFailed", err)
 	}
-	if len(harness.eventLog.recordedEvents) != 0 || len(harness.broker.publishedEvents) != 0 {
-		t.Errorf("recorded/published events = %d/%d, want none when the lookup fails",
-			len(harness.eventLog.recordedEvents), len(harness.broker.publishedEvents))
-	}
-}
-
-func TestChangePasswordPropagatesASaveFailure(t *testing.T) {
-	harness := newChangePasswordForTest(t)
-	saveFailure := usererrors.ErrChangePasswordFailed{Cause: errors.New("pq: connection refused")}
-	harness.store.changePasswordFailure = saveFailure
-
-	err := harness.change(harness.validParams())
-
-	if err != saveFailure {
-		t.Fatalf("error = %#v, want the repository's own error passed through unchanged", err)
-	}
-	assertPasswordNotChanged(t, harness)
+	harness.assertPasswordNotChanged(t)
 }

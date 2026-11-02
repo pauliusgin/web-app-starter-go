@@ -178,7 +178,7 @@ func TestVerifyEmailFailsWhenTheVerificationFails(t *testing.T) {
 			name: "the link was issued for another purpose",
 			failure: challenge.ErrChallengePurposeMismatch{
 				Want: challenge.PurposeEmailVerification,
-				Got:  challenge.PasswordReset,
+				Got:  challenge.PurposePasswordReset,
 			},
 			wantStatus:  http.StatusBadRequest,
 			wantCode:    handlers.ErrorCodeVerificationLinkInvalid,

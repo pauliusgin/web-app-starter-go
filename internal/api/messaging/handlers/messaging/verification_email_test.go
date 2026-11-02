@@ -118,7 +118,7 @@ func TestVerificationEmailHandlerIgnoresChallengesWithoutAnEmailedLink(t *testin
 
 	otherPurposes := []challenge.Purpose{
 		challenge.PurposePhoneVerification,
-		challenge.PasswordReset,
+		challenge.PurposePasswordReset,
 	}
 
 	for _, purpose := range otherPurposes {

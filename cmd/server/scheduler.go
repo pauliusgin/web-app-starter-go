@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/brokers/rabbitmq"
-	auth "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/auth/repositories"
+	authrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/auth/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
 	uploadsrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/uploads/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/storage"
-	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/usecases"
+	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
 	"github.com/pauliusgin/web_app_starter-be/internal/scheduler"
 )
 
@@ -27,14 +27,14 @@ const pendingUploadCleanupMessage = "stale pending uploads purged"
 
 const pendingUploadCleanupTimeout = 10 * time.Minute
 
-type schedulerParams struct {
+type buildSchedulerParams struct {
 	Database       *sql.DB
 	Logger         *slog.Logger
 	EventPublisher rabbitmq.EventPublisher
 	FileStorage    storage.FileStorage
 }
 
-func buildScheduler(params schedulerParams) (scheduler.Scheduler, error) {
+func buildScheduler(params buildSchedulerParams) (scheduler.Scheduler, error) {
 	logger := params.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -44,21 +44,25 @@ func buildScheduler(params schedulerParams) (scheduler.Scheduler, error) {
 
 	return newSchedulerWithJobs(newSchedulerWithJobsParams{
 		Logger: logger,
-		Jobs: []scheduler.Job{
-			refreshTokenCleanupJob(params),
-			pendingUploadCleanupJob(params),
-		},
+		Jobs:   backgroundJobs(params),
 	})
 }
 
-func refreshTokenCleanupJob(params schedulerParams) scheduler.Job {
-	cleanupDependencies := refreshtoken.UnusedDeletionDependencies{
-		WriteRepository: auth.NewRefreshTokenWriteRepository(sqlc.New(params.Database)),
+func backgroundJobs(params buildSchedulerParams) []scheduler.Job {
+	return []scheduler.Job{
+		refreshTokenCleanupJob(params),
+		pendingUploadCleanupJob(params),
+	}
+}
+
+func refreshTokenCleanupJob(params buildSchedulerParams) scheduler.Job {
+	cleanupDependencies := refreshtoken.DeleteUnusedRefreshTokensDependencies{
+		WriteRepository: authrepo.NewRefreshTokenWriteRepository(sqlc.New(params.Database)),
 	}
 
 	deleteRefreshTokens := func(ctx context.Context) error {
 		deletedCount, err := refreshtoken.DeleteUnusedRefreshTokens(ctx, cleanupDependencies,
-			refreshtoken.UnusedDeletionParams{CleanUpThreshold: refreshtoken.CleanUpThresholdInDays})
+			refreshtoken.DeleteUnusedRefreshTokensParams{CleanUpThresholdInDays: refreshtoken.CleanUpThresholdInDays})
 		if err != nil {
 			return err
 		}
@@ -76,11 +80,11 @@ func refreshTokenCleanupJob(params schedulerParams) scheduler.Job {
 	}
 }
 
-func pendingUploadCleanupJob(params schedulerParams) scheduler.Job {
+func pendingUploadCleanupJob(params buildSchedulerParams) scheduler.Job {
 	queries := sqlc.New(params.Database)
 	cleanupDependencies := uploadusecases.DeleteStalePendingUploadsDependencies{
-		UploadRepository: uploadsrepo.NewUploadRepository(queries),
-		FileStorage:      params.FileStorage,
+		UploadWriteRepository: uploadsrepo.NewUploadWriteRepository(queries),
+		FileStorage:           params.FileStorage,
 		EventDispatcher: buildEventDispatcher(buildEventDispatcherParams{
 			Queries:   queries,
 			Publisher: params.EventPublisher.PublishEvent,

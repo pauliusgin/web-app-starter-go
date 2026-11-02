@@ -13,16 +13,19 @@ func TestValidateChangePasswordInput(t *testing.T) {
 	cases := []struct {
 		name          string
 		input         ChangePasswordInput
+		want          ChangePasswordInput
 		wantErr       bool
 		wantErrTarget any
 	}{
 		{
 			name:  "current password and a valid new password",
 			input: ChangePasswordInput{CurrentPassword: testPassword, NewPassword: replacementPassword},
+			want:  ChangePasswordInput{CurrentPassword: testPassword, NewPassword: replacementPassword},
 		},
 		{
 			name:  "current password predating the rules is still accepted",
 			input: ChangePasswordInput{CurrentPassword: "short", NewPassword: replacementPassword},
+			want:  ChangePasswordInput{CurrentPassword: "short", NewPassword: replacementPassword},
 		},
 		{
 			name:          "missing current password",
@@ -46,11 +49,14 @@ func TestValidateChangePasswordInput(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := ValidateChangePasswordInput(testCase.input)
+			got, err := ValidateChangePasswordInput(testCase.input)
 
 			if !testCase.wantErr {
 				if err != nil {
 					t.Fatalf("ValidateChangePasswordInput: %v", err)
+				}
+				if got != testCase.want {
+					t.Fatalf("ValidateChangePasswordInput = %+v, want %+v", got, testCase.want)
 				}
 				return
 			}

@@ -24,7 +24,7 @@ func TestBuildSchedulerRegistersBackgroundJobs(t *testing.T) {
 	logger, _ := newBufferedLogger()
 
 	// The cleanup job only touches the database when it fires at midnight, never during the build.
-	jobScheduler, err := buildScheduler(schedulerParams{Logger: logger})
+	jobScheduler, err := buildScheduler(buildSchedulerParams{Logger: logger})
 	if err != nil {
 		t.Fatalf("buildScheduler = %v, want nil", err)
 	}

@@ -19,7 +19,7 @@ type requestEmailChangeRequest struct {
 // RequestEmailChangeUseCase is the domain call the email change request handler depends on.
 type RequestEmailChangeUseCase func(ctx context.Context, params usecases.RequestEmailChangeParams) error
 
-// RequestEmailChangeDependencies carries the collaborator the email change request handler orchestrates.
+// RequestEmailChangeDependencies carries the use case mailing a link to the address the caller asked for.
 type RequestEmailChangeDependencies struct {
 	RequestEmailChange RequestEmailChangeUseCase
 }
@@ -42,10 +42,10 @@ func RequestEmailChange(d RequestEmailChangeDependencies) http.HandlerFunc {
 			return
 		}
 
-		requestEmailChangeInput := input.RequestEmailChangeInput{
-			NewEmail: normalizeEmail(request.NewEmail),
-		}
-		if err := input.ValidateRequestEmailChangeInput(requestEmailChangeInput); err != nil {
+		requestEmailChangeInput, err := input.ValidateRequestEmailChangeInput(input.RequestEmailChangeInput{
+			NewEmail: request.NewEmail,
+		})
+		if err != nil {
 			writeRequestEmailChangeFailure(w, err)
 			return
 		}

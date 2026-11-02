@@ -9,5 +9,6 @@ import (
 
 // MessageWriteRepository is the messaging_log write port the messaging use cases record sends through.
 type MessageWriteRepository interface {
-	Save(ctx context.Context, newMessage models.NewMessage) (models.Message, error)
+	// SaveMessage records the message in the messaging log and returns it as stored.
+	SaveMessage(ctx context.Context, newMessage models.NewMessage) (models.Message, error)
 }

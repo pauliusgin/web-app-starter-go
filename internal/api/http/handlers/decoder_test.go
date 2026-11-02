@@ -74,9 +74,9 @@ func TestDecodeRequestRejectsNonJSONContentTypes(t *testing.T) {
 
 			decoded, err := decodeTestRequest(t, testCase.contentType, body)
 
-			unsupported := ErrUnsupportedContentType{}
+			unsupported := ErrContentTypeUnsupported{}
 			if !errors.As(err, &unsupported) {
-				t.Fatalf("DecodeRequest returned %v, want ErrUnsupportedContentType", err)
+				t.Fatalf("DecodeRequest returned %v, want ErrContentTypeUnsupported", err)
 			}
 			if unsupported.ContentType != testCase.contentType {
 				t.Errorf("ContentType = %q, want the raw header %q", unsupported.ContentType, testCase.contentType)
@@ -212,7 +212,7 @@ func TestRequestDecodingRulesAnswerEveryDecoderFailure(t *testing.T) {
 			wantStatus: http.StatusBadRequest, wantCode: ErrorCodeRequestBodyInvalid},
 		{name: "too large", err: ErrRequestBodyTooLarge{Limit: 1024},
 			wantStatus: http.StatusRequestEntityTooLarge, wantCode: ErrorCodeRequestBodyTooLarge},
-		{name: "unsupported content type", err: ErrUnsupportedContentType{},
+		{name: "unsupported content type", err: ErrContentTypeUnsupported{},
 			wantStatus: http.StatusUnsupportedMediaType, wantCode: ErrorCodeUnsupportedContentType},
 	}
 

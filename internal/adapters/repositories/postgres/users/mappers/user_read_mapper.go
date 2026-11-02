@@ -6,8 +6,8 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
 )
 
-// UserReadModelFromIDMapper maps the FindUserReadModelByID row onto the read model; NULL → nil.
-func UserReadModelFromIDMapper(row sqlc.FindUserReadModelByIDRow) models.UserReadModel {
+// UserReadModelFromIDMapper maps the GetUserReadModelByID row onto the read model; NULL → nil.
+func UserReadModelFromIDMapper(row sqlc.GetUserReadModelByIDRow) models.UserReadModel {
 	mapped := models.UserReadModel{
 		ID:              row.ID,
 		Email:           row.Email,

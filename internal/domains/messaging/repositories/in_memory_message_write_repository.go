@@ -21,8 +21,8 @@ func NewInMemoryMessageWriteRepository() *InMemoryMessageWriteRepository {
 	return &InMemoryMessageWriteRepository{}
 }
 
-// Save records the message, or returns SaveFailure when one is staged.
-func (r *InMemoryMessageWriteRepository) Save(
+// SaveMessage records the message, or returns SaveFailure when one is staged.
+func (r *InMemoryMessageWriteRepository) SaveMessage(
 	_ context.Context,
 	newMessage models.NewMessage,
 ) (models.Message, error) {

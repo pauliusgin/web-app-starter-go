@@ -9,15 +9,20 @@ type SignUpInput struct {
 	Password string
 }
 
-// ValidateSignUpInput checks every signup field and reports the first one that fails.
-func ValidateSignUpInput(signUpInput SignUpInput) error {
+// ValidateSignUpInput normalizes the email, checks every signup field and reports the first one that fails.
+func ValidateSignUpInput(rawInput SignUpInput) (SignUpInput, error) {
+	signUpInput := SignUpInput{
+		Email:    primitive.NormalizeEmail(rawInput.Email),
+		Password: rawInput.Password,
+	}
+
 	if err := primitive.ValidateEmail(signUpInput.Email); err != nil {
-		return err
+		return SignUpInput{}, err
 	}
 
 	if err := primitive.ValidatePassword(signUpInput.Password); err != nil {
-		return err
+		return SignUpInput{}, err
 	}
 
-	return nil
+	return signUpInput, nil
 }

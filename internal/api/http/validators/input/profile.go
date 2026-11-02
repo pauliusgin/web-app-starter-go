@@ -1,21 +1,30 @@
 package input
 
-import "github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/primitive"
+import (
+	"strings"
 
-// ProfileInput carries the profile names to validate, shared by profile creation and update.
+	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/primitive"
+)
+
+// ProfileInput carries the profile names to validate on creation or replacement.
 type ProfileInput struct {
 	FirstName string
 	LastName  string
 }
 
-// ValidateProfileInput checks both names arrived and are not blank.
-func ValidateProfileInput(profileInput ProfileInput) error {
-	if err := primitive.RequiredString(profileInput.FirstName); err != nil {
-		return primitive.ErrFirstNameMissing{}
-	}
-	if err := primitive.RequiredString(profileInput.LastName); err != nil {
-		return primitive.ErrLastNameMissing{}
+// ValidateProfileInput trims and checks both names; they come back as they are stored.
+func ValidateProfileInput(rawInput ProfileInput) (ProfileInput, error) {
+	profileInput := ProfileInput{
+		FirstName: strings.TrimSpace(rawInput.FirstName),
+		LastName:  strings.TrimSpace(rawInput.LastName),
 	}
 
-	return nil
+	if err := primitive.RequiredString(profileInput.FirstName); err != nil {
+		return ProfileInput{}, primitive.ErrFirstNameMissing{}
+	}
+	if err := primitive.RequiredString(profileInput.LastName); err != nil {
+		return ProfileInput{}, primitive.ErrLastNameMissing{}
+	}
+
+	return profileInput, nil
 }

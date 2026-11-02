@@ -8,9 +8,10 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
 	e "github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/errors"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/models"
+	write "github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/repositories"
 )
 
-var _ MessageWriteRepository = MessageWriteRepository{}
+var _ write.MessageWriteRepository = MessageWriteRepository{}
 
 // MessageWriteRepository stores sent messages through the generated sqlc queries.
 type MessageWriteRepository struct {
@@ -22,8 +23,8 @@ func NewMessageWriteRepository(queries *sqlc.Queries) MessageWriteRepository {
 	return MessageWriteRepository{queries: queries}
 }
 
-// Save inserts the message and returns the row the database produced.
-func (r MessageWriteRepository) Save(ctx context.Context, newMessage models.NewMessage) (models.Message, error) {
+// SaveMessage inserts the message and returns the row the database produced.
+func (r MessageWriteRepository) SaveMessage(ctx context.Context, newMessage models.NewMessage) (models.Message, error) {
 	row, err := r.queries.SaveMessage(ctx, mappers.SaveMessageParamsMapper(newMessage))
 	if err != nil {
 		return models.Message{}, e.ErrSaveMessageFailed{MessageType: string(newMessage.Type), Cause: err}

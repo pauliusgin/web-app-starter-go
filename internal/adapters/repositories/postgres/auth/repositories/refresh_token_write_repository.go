@@ -26,18 +26,12 @@ func NewRefreshTokenWriteRepository(queries *sqlc.Queries) RefreshTokenWriteRepo
 	return RefreshTokenWriteRepository{queries: queries}
 }
 
-// Save inserts the refresh token and returns the row the database produced.
-func (r RefreshTokenWriteRepository) Save(
+// SaveRefreshToken inserts the refresh token and returns the row the database produced.
+func (r RefreshTokenWriteRepository) SaveRefreshToken(
 	ctx context.Context,
 	newRefreshToken refreshtoken.NewRefreshToken,
 ) (refreshtoken.RefreshToken, error) {
-	row, err := r.queries.CreateRefreshToken(ctx, sqlc.CreateRefreshTokenParams{
-		ID:        newRefreshToken.ID,
-		UserID:    newRefreshToken.UserID,
-		TokenHash: newRefreshToken.TokenHash,
-		CreatedAt: time.Now(),
-		ExpiresAt: newRefreshToken.ExpiresAt,
-	})
+	row, err := r.queries.CreateRefreshToken(ctx, mappers.CreateRefreshTokenParamsMapper(newRefreshToken, time.Now()))
 	if err != nil {
 		return refreshtoken.RefreshToken{}, refreshtoken.ErrSaveRefreshTokenFailed{Cause: err}
 	}

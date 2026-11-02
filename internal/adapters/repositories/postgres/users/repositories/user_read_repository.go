@@ -26,14 +26,14 @@ func NewUserReadRepository(queries *sqlc.Queries) UserReadRepository {
 	return UserReadRepository{queries: queries}
 }
 
-// FindUserReadModelByID returns the user with the given ID, or usererrors.ErrUserNotFound.
-func (r UserReadRepository) FindUserReadModelByID(ctx context.Context, id uuid.UUID) (models.UserReadModel, error) {
-	row, err := r.queries.FindUserReadModelByID(ctx, id)
+// GetUserReadModelByID returns the user with the given ID, or usererrors.ErrUserNotFound.
+func (r UserReadRepository) GetUserReadModelByID(ctx context.Context, id uuid.UUID) (models.UserReadModel, error) {
+	row, err := r.queries.GetUserReadModelByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.UserReadModel{}, usererrors.ErrUserNotFound{}
+		return models.UserReadModel{}, usererrors.ErrUserNotFound{ID: id}
 	}
 	if err != nil {
-		return models.UserReadModel{}, usererrors.ErrIDLookupFailed{Cause: err}
+		return models.UserReadModel{}, usererrors.ErrFindUserFailed{ID: id, Cause: err}
 	}
 
 	return mappers.UserReadModelFromIDMapper(row), nil

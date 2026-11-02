@@ -30,8 +30,8 @@ type authChallengeGeneratedRedactedData struct {
 	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
-// NewAuthChallengeParams is the challenge an auth_challenge.generated event carries.
-type NewAuthChallengeParams struct {
+// NewAuthChallengeGeneratedParams is the challenge an auth_challenge.generated event carries.
+type NewAuthChallengeGeneratedParams struct {
 	ChallengeID uuid.UUID
 	UserID      uuid.UUID
 	TargetType  string
@@ -42,7 +42,7 @@ type NewAuthChallengeParams struct {
 }
 
 // NewAuthChallengeGenerated builds the event announcing a freshly minted verification challenge.
-func NewAuthChallengeGenerated(params NewAuthChallengeParams) (events.NewEvent, error) {
+func NewAuthChallengeGenerated(params NewAuthChallengeGeneratedParams) (events.NewEvent, error) {
 	return events.New(events.NewEventParams{
 		Label:  events.AuthChallengeGeneratedLabel,
 		UserID: uuid.NullUUID{UUID: params.UserID, Valid: true},
@@ -67,7 +67,7 @@ func NewAuthChallengeGenerated(params NewAuthChallengeParams) (events.NewEvent, 
 }
 
 // DispatchAuthChallengeGenerated builds, records and publishes the event announcing a minted challenge.
-func DispatchAuthChallengeGenerated(ctx context.Context, dispatcher events.Dispatcher, params NewAuthChallengeParams) {
+func DispatchAuthChallengeGenerated(ctx context.Context, dispatcher events.Dispatcher, params NewAuthChallengeGeneratedParams) {
 	dispatcher.Dispatch(ctx, func() (events.NewEvent, error) {
 		return NewAuthChallengeGenerated(params)
 	})

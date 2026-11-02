@@ -9,8 +9,7 @@ import (
 
 const emailTakenText = "expected an email that does not already have an account"
 const userNotFoundText = "user not found"
-const emailLookupFailedText = "failed checking whether the email already has an account"
-const idLookupFailedText = "failed finding the user by id"
+const findUserFailedText = "failed finding the user"
 const passwordHashingFailedText = "failed hashing the password"
 const saveUserFailedText = "failed saving the user"
 const markEmailVerifiedFailedText = "failed marking the user's email verified"
@@ -18,7 +17,6 @@ const invalidCredentialsText = "expected an email and password matching an exist
 const passwordVerificationFailedText = "failed checking the password against the stored hash"
 const markSignedInFailedText = "failed stamping the user's sign-in"
 const verificationLinkInvalidText = "expected a verification link that is unused and not expired"
-const userDeletionForbiddenText = "expected users to delete only their own account"
 const softDeleteUserFailedText = "failed soft-deleting the user"
 const emailUnchangedText = "expected a new email different from the current one"
 const changeEmailFailedText = "failed changing the user's email"
@@ -51,29 +49,18 @@ func (e ErrUserNotFound) Error() string {
 	return fmt.Sprintf("%s", userNotFoundText)
 }
 
-// ErrIDLookupFailed reports a lookup by id the database could not complete.
-type ErrIDLookupFailed struct {
+// ErrFindUserFailed reports a lookup by id or email the database could not complete.
+type ErrFindUserFailed struct {
+	ID    uuid.UUID
+	Email string
 	Cause error
 }
 
-func (e ErrIDLookupFailed) Error() string {
-	return fmt.Sprintf("%s: %s", idLookupFailedText, e.Cause)
+func (e ErrFindUserFailed) Error() string {
+	return fmt.Sprintf("%s (id %s, email %q): %s", findUserFailedText, e.ID, e.Email, e.Cause)
 }
 
-func (e ErrIDLookupFailed) Unwrap() error {
-	return e.Cause
-}
-
-// ErrEmailLookupFailed reports a lookup by email the database could not complete.
-type ErrEmailLookupFailed struct {
-	Cause error
-}
-
-func (e ErrEmailLookupFailed) Error() string {
-	return fmt.Sprintf("%s: %s", emailLookupFailedText, e.Cause)
-}
-
-func (e ErrEmailLookupFailed) Unwrap() error {
+func (e ErrFindUserFailed) Unwrap() error {
 	return e.Cause
 }
 
@@ -123,10 +110,10 @@ func (e ErrVerificationLinkInvalid) Error() string {
 	return fmt.Sprintf("invalid verification link: %s", verificationLinkInvalidText)
 }
 
-// ErrInvalidCredentials reports a sign-in whose email is unknown or whose password does not match.
-type ErrInvalidCredentials struct{}
+// ErrCredentialsInvalid reports a sign-in whose email is unknown or whose password does not match.
+type ErrCredentialsInvalid struct{}
 
-func (e ErrInvalidCredentials) Error() string {
+func (e ErrCredentialsInvalid) Error() string {
 	return fmt.Sprintf("invalid credentials: %s", invalidCredentialsText)
 }
 
@@ -154,16 +141,6 @@ func (e ErrMarkSignedInFailed) Error() string {
 
 func (e ErrMarkSignedInFailed) Unwrap() error {
 	return e.Cause
-}
-
-// ErrUserDeletionForbidden reports an attempt to delete an account other than the caller's own.
-type ErrUserDeletionForbidden struct {
-	ActingUserID uuid.UUID
-	TargetUserID uuid.UUID
-}
-
-func (e ErrUserDeletionForbidden) Error() string {
-	return fmt.Sprintf("user %s cannot delete user %s: %s", e.ActingUserID, e.TargetUserID, userDeletionForbiddenText)
 }
 
 // ErrSoftDeleteUserFailed reports a soft delete the database could not write.

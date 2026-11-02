@@ -6,7 +6,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/token"
 )
 
-// RevokeDependencies carries the collaborators revoking a refresh token needs.
+// RevokeDependencies carries the refresh token lookup and the store the token is revoked in.
 type RevokeDependencies struct {
 	ReadRepository  ReadRepository
 	WriteRepository WriteRepository

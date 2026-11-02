@@ -26,13 +26,13 @@ func (e ErrFailedIntParse) Error() string {
 	return fmt.Sprintf("invalid %s %q: %s", e.Variable, e.RawValue, failedIntParseText)
 }
 
-// ErrInvalidPort reports a port variable outside the 1..65535 range.
-type ErrInvalidPort struct {
+// ErrPortInvalid reports a port variable outside the 1..65535 range.
+type ErrPortInvalid struct {
 	Variable string
 	RawValue string
 }
 
-func (e ErrInvalidPort) Error() string {
+func (e ErrPortInvalid) Error() string {
 	return fmt.Sprintf("invalid %s %q: %s", e.Variable, e.RawValue, portExpectationText)
 }
 
