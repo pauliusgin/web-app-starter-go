@@ -1,26 +1,17 @@
 package rabbitmq
 
 import (
-	"strings"
 	"testing"
 )
 
-func TestBrokerAddressDropsCredentials(t *testing.T) {
-	address := SanitizeBrokerAddress("amqp://user:s3cret@localhost:5672/web_app_starter")
-
-	if strings.Contains(address, "s3cret") || strings.Contains(address, "user") {
-		t.Fatalf("expected the credentials to be dropped, got %q", address)
-	}
-}
-
-func TestBrokerAddress(t *testing.T) {
-	testCases := []struct {
+func TestSanitizeBrokerAddress(t *testing.T) {
+	cases := []struct {
 		name    string
 		amqpURL string
 		want    string
 	}{
 		{
-			name:    "keeps the host and the vhost",
+			name:    "drops the credentials and keeps the host and the vhost",
 			amqpURL: "amqp://user:password@localhost:5672/web_app_starter",
 			want:    "localhost:5672/web_app_starter",
 		},
@@ -41,7 +32,7 @@ func TestBrokerAddress(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range testCases {
+	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			got := SanitizeBrokerAddress(testCase.amqpURL)
 

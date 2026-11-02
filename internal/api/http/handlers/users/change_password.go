@@ -71,6 +71,8 @@ var changePasswordRules = []handlers.RejectionRule{
 		handlers.Rejection{Status: http.StatusBadRequest, Code: handlers.ErrorCodePasswordUnchanged}),
 	handlers.RejectWhen[usererrors.ErrCurrentPasswordIncorrect](
 		handlers.Rejection{Status: http.StatusForbidden, Code: handlers.ErrorCodeCurrentPasswordIncorrect}),
+	handlers.RejectWhen[usererrors.ErrPasswordNotSet](
+		handlers.Rejection{Status: http.StatusConflict, Code: handlers.ErrorCodePasswordNotSet}),
 }
 
 func writeChangePasswordFailure(w http.ResponseWriter, err error) {

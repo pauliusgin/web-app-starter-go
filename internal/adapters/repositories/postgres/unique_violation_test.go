@@ -21,10 +21,10 @@ func TestIsUniqueViolation(t *testing.T) {
 		{name: "nil", err: nil, want: false},
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := IsUniqueViolation(tc.err); got != tc.want {
-				t.Errorf("IsUniqueViolation(%v) = %v, want %v", tc.err, got, tc.want)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := IsUniqueViolation(testCase.err); got != testCase.want {
+				t.Errorf("IsUniqueViolation(%v) = %v, want %v", testCase.err, got, testCase.want)
 			}
 		})
 	}

@@ -24,7 +24,7 @@ type SignInUserResult struct {
 	User models.User
 }
 
-// SignInUserDependencies carries the collaborators signing a user in needs.
+// SignInUserDependencies carries the user store holding the credentials and the dispatcher announcing the sign-in.
 type SignInUserDependencies struct {
 	UserWriteRepository repositories.UserRepository
 	EventDispatcher     events.Dispatcher
@@ -46,6 +46,9 @@ func SignInUser(
 	}
 	if err != nil {
 		return SignInUserResult{}, err
+	}
+	if !credentials.HasPassword() {
+		return SignInUserResult{}, rejectUnknownAccount(params.Password)
 	}
 
 	err = verifyUserPassword(password.VerificationParams{

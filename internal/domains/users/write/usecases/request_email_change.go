@@ -16,13 +16,14 @@ type RequestEmailChangeParams struct {
 	NewEmail string
 }
 
-// RequestEmailChangeDependencies carries the collaborators requesting an email change needs.
+// RequestEmailChangeDependencies carries the user store, the issuance limit check and the link generator.
 type RequestEmailChangeDependencies struct {
-	UserWriteRepository   repositories.UserRepository
-	GenerateAuthChallenge GenerateAuthChallenge
+	UserWriteRepository            repositories.UserRepository
+	EnsureChallengeIssuanceAllowed EnsureChallengeIssuanceAllowed
+	GenerateAuthChallenge          GenerateAuthChallenge
 }
 
-// RequestEmailChange mails a verification link to the new address once it is free and different.
+// RequestEmailChange mails a verification link to the new address once it is free, different and not rate limited.
 func RequestEmailChange(
 	ctx context.Context,
 	d RequestEmailChangeDependencies,
@@ -38,6 +39,15 @@ func RequestEmailChange(
 	}
 
 	if err := ensureEmailAvailable(ctx, ensureEmailAvailableParams{UserWriteRepository: d.UserWriteRepository, Email: params.NewEmail}); err != nil {
+		return err
+	}
+
+	err = d.EnsureChallengeIssuanceAllowed(ctx, challenge.EnsureIssuanceAllowedParams{
+		UserID:  storedUser.ID,
+		Target:  params.NewEmail,
+		Purpose: challenge.PurposeEmailVerification,
+	})
+	if err != nil {
 		return err
 	}
 

@@ -14,8 +14,6 @@ import (
 
 const unexpectedFailureTextForTest = "could not do the thing"
 
-const rejectedLogTextForTest = "rejected the thing"
-
 const fixedMessageForTest = "you may not do the thing"
 
 type errFirstRuleForTest struct{}
@@ -158,51 +156,75 @@ func TestWriteRejectionAnswersAMatchedError(t *testing.T) {
 	}
 }
 
-func TestWriteRejectionLogsMatchedRejectionsOnlyWhenAskedTo(t *testing.T) {
-	cases := []struct {
-		name            string
-		rejectedLogText string
-		wantWarning     bool
-	}{
-		{name: "rejected log text set", rejectedLogText: rejectedLogTextForTest, wantWarning: true},
-		{name: "rejected log text empty"},
-	}
+func TestWriteRejectionDoesNotLogClientErrors(t *testing.T) {
+	logs := captureLogs(t)
 
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			logs := captureLogs(t)
-
-			writeRejectionForTest(t, WriteRejectionParams{
-				Err:                   errFirstRuleForTest{},
-				RuleSets:              [][]RejectionRule{firstRulesForTest},
-				UnexpectedFailureText: unexpectedFailureTextForTest,
-				RejectedLogText:       testCase.rejectedLogText,
-			})
-
-			warned := strings.Contains(logs.String(), "level=WARN")
-			if warned != testCase.wantWarning {
-				t.Errorf("warning logged = %t, want %t (logs %q)", warned, testCase.wantWarning, logs.String())
-			}
-		})
-	}
-}
-
-func TestWriteRejectionAnswersAbsentDetailsAsNull(t *testing.T) {
-	captureLogs(t)
-
-	recorder := httptest.NewRecorder()
-	WriteRejection(recorder, WriteRejectionParams{
+	writeRejectionForTest(t, WriteRejectionParams{
 		Err:                   errFirstRuleForTest{},
 		RuleSets:              [][]RejectionRule{firstRulesForTest},
 		UnexpectedFailureText: unexpectedFailureTextForTest,
 	})
 
-	body := map[string]any{}
-	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
-		t.Fatalf("decoding the response body: %v", err)
+	if logs.Len() != 0 {
+		t.Errorf("logs = %q, want a matched rejection to log nothing", logs.String())
 	}
-	details, present := body["details"]
-	if !present || details != nil {
-		t.Errorf("details = %v (present %t), want present as null", details, present)
+}
+
+var detailedRulesForTest = []RejectionRule{
+	RejectWhenWithDetails[errSecondRuleForTest](
+		Rejection{Status: http.StatusTooManyRequests, Code: ErrorCodeVerificationEmailRateLimited},
+		func(matched errSecondRuleForTest) map[string]any {
+			return map[string]any{"detail": matched.Detail}
+		}),
+}
+
+func TestSelectRejectionReadsDetailsOffTheMatchedError(t *testing.T) {
+	rejection, matched := SelectRejection(fmt.Errorf("wrapped: %w", errSecondRuleForTest{Detail: "wait"}), detailedRulesForTest)
+
+	if !matched {
+		t.Fatal("matched = false, want the detailed rule to match")
+	}
+	if rejection.Details["detail"] != "wait" {
+		t.Errorf("Details = %v, want detail read off the matched error", rejection.Details)
+	}
+}
+
+func TestWriteRejectionAnswersDetailsAndNullWithout(t *testing.T) {
+	cases := []struct {
+		name        string
+		err         error
+		wantDetails map[string]any
+	}{
+		{name: "rule with details", err: errSecondRuleForTest{Detail: "wait"}, wantDetails: map[string]any{"detail": "wait"}},
+		{name: "rule without details", err: errFirstRuleForTest{}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			WriteRejection(recorder, WriteRejectionParams{
+				Err:      testCase.err,
+				RuleSets: [][]RejectionRule{detailedRulesForTest, firstRulesForTest},
+			})
+
+			body := map[string]any{}
+			if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+				t.Fatalf("decoding the response body: %v", err)
+			}
+
+			details, present := body["details"]
+			if !present {
+				t.Fatal("details key missing, want it present")
+			}
+			if testCase.wantDetails == nil {
+				if details != nil {
+					t.Errorf("details = %v, want null", details)
+				}
+				return
+			}
+			if fmt.Sprint(details) != fmt.Sprint(testCase.wantDetails) {
+				t.Errorf("details = %v, want %v", details, testCase.wantDetails)
+			}
+		})
 	}
 }

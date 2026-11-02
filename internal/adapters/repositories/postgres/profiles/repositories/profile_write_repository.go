@@ -39,7 +39,7 @@ func (r ProfileWriteRepository) SaveProfile(ctx context.Context, newProfile mode
 	return mappers.ProfileMapper(row), nil
 }
 
-// UpdateProfile replaces the names of a live profile, or returns e.ErrProfileNotFound.
+// UpdateProfile replaces the names and picture of a live profile, or returns e.ErrProfileNotFound.
 func (r ProfileWriteRepository) UpdateProfile(
 	ctx context.Context,
 	change models.UpdateProfileParams,

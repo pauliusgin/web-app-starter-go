@@ -27,7 +27,7 @@ type uploadedFileResponse struct {
 	Purpose     string    `json:"purpose"`
 	Kind        string    `json:"kind"`
 	MimeType    string    `json:"mimeType"`
-	OriginalURL string    `json:"originalUrl"`
+	OriginalURL *string   `json:"originalUrl"`
 	PreviewURL  *string   `json:"previewUrl"`
 }
 
@@ -245,6 +245,5 @@ func writeUploadFilesFailure(w http.ResponseWriter, err error) {
 		Err:                   err,
 		RuleSets:              [][]handlers.RejectionRule{uploadFormRules, uploadFilesRules},
 		UnexpectedFailureText: unexpectedUploadFailureText,
-		RejectedLogText:       uploadRejectedText,
 	})
 }

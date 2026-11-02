@@ -15,12 +15,14 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 )
 
-// ContractSubject is one fresh, empty store seen through both ports, and a way to create the users its uploads
-// belong to. Writes through WriteRepository must be visible through ReadRepository.
+// ContractSubject is one fresh, empty store seen through both ports, a way to create the users its uploads
+// belong to and a way to make some resource point at an upload. Writes through WriteRepository must be visible
+// through ReadRepository.
 type ContractSubject struct {
 	WriteRepository repositories.UploadWriteRepository
 	ReadRepository  read.UploadReadRepository
 	SeedUser        func(t *testing.T) uuid.UUID
+	ReferenceUpload func(t *testing.T, upload models.Upload)
 }
 
 // RunUploadRepositoryContractParams builds a fresh ContractSubject for every contract case.
@@ -36,8 +38,12 @@ func RunUploadRepositoryContract(t *testing.T, params RunUploadRepositoryContrac
 	}{
 		{name: "saved upload is read back only by its owner", run: savedUploadIsReadBackOnlyByItsOwner},
 		{name: "a missing preview reads back as nil", run: aMissingPreviewReadsBackAsNil},
+		{name: "a missing original reads back as nil", run: aMissingOriginalReadsBackAsNil},
+		{name: "attaching needs the owner and the purpose", run: attachingNeedsTheOwnerAndThePurpose},
 		{name: "a fresh pending upload is not stale yet", run: aFreshPendingUploadIsNotStaleYet},
 		{name: "deleting removes the upload and tolerates a missing one", run: deletingRemovesTheUpload},
+		{name: "only an unreferenced upload is found as unreferenced", run: onlyAnUnreferencedUploadIsFound},
+		{name: "a freshly attached unreferenced upload is not orphaned yet", run: aFreshAttachedUploadIsNotOrphanedYet},
 	}
 
 	for _, testCase := range cases {
@@ -117,17 +123,19 @@ func savedUploadIsReadBackOnlyByItsOwner(t *testing.T, harness contractHarness) 
 		t.Fatalf("GetUploadReadModelByID: %v", err)
 	}
 	want := readmodels.UploadReadModel{
-		ID:          saved.ID,
-		UserID:      harness.userID,
-		Purpose:     string(models.PurposeProfilePicture),
-		Kind:        string(models.KindImage),
-		MimeType:    "image/png",
-		OriginalURL: saved.OriginalURL,
+		ID:       saved.ID,
+		UserID:   harness.userID,
+		Purpose:  string(models.PurposeProfilePicture),
+		Kind:     string(models.KindImage),
+		MimeType: "image/png",
 	}
-	gotPreview := readBack.PreviewURL
-	readBack.PreviewURL = nil
+	gotOriginal, gotPreview := readBack.OriginalURL, readBack.PreviewURL
+	readBack.OriginalURL, readBack.PreviewURL = nil, nil
 	if readBack != want {
 		t.Errorf("read back = %+v, want %+v", readBack, want)
+	}
+	if gotOriginal == nil || *gotOriginal != saved.OriginalURL {
+		t.Errorf("OriginalURL = %v, want %q", gotOriginal, saved.OriginalURL)
 	}
 	if gotPreview == nil || *gotPreview != "https://files.example/preview.webp" {
 		t.Errorf("PreviewURL = %v, want the preview URL", gotPreview)
@@ -146,6 +154,44 @@ func aMissingPreviewReadsBackAsNil(t *testing.T, harness contractHarness) {
 	}
 	if readBack.PreviewURL != nil {
 		t.Errorf("PreviewURL = %q, want nil for an upload without a preview", *readBack.PreviewURL)
+	}
+}
+
+func aMissingOriginalReadsBackAsNil(t *testing.T, harness contractHarness) {
+	previewOnly := harness.newUpload("https://files.example/preview.webp")
+	previewOnly.OriginalPath = ""
+	previewOnly.OriginalURL = ""
+	saved := harness.saveNewUpload(t, previewOnly)
+
+	if saved.OriginalPath != "" || saved.PreviewPath == "" {
+		t.Errorf("saved paths = %q, %q, want only the preview", saved.OriginalPath, saved.PreviewPath)
+	}
+	readBack, err := harness.read(harness.userID, saved.ID)
+	if err != nil {
+		t.Fatalf("GetUploadReadModelByID: %v", err)
+	}
+	if readBack.OriginalURL != nil {
+		t.Errorf("OriginalURL = %q, want nil for a preview-only upload", *readBack.OriginalURL)
+	}
+}
+
+func attachingNeedsTheOwnerAndThePurpose(t *testing.T, harness contractHarness) {
+	saved := harness.save(t, "")
+
+	_, err := harness.subject.WriteRepository.AttachUpload(harness.ctx, models.AttachUploadParams{
+		ID: saved.ID, UserID: uuid.New(), Purpose: models.PurposeProfilePicture,
+	})
+	assertUploadNotFound(t, err)
+	_, err = harness.subject.WriteRepository.AttachUpload(harness.ctx, models.AttachUploadParams{
+		ID: saved.ID, UserID: harness.userID, Purpose: models.PurposeDocumentAttachment,
+	})
+	assertUploadNotFound(t, err)
+
+	attached, err := harness.subject.WriteRepository.AttachUpload(harness.ctx, models.AttachUploadParams{
+		ID: saved.ID, UserID: harness.userID, Purpose: models.PurposeProfilePicture,
+	})
+	if err != nil || !attached.IsAttached() {
+		t.Errorf("AttachUpload = %+v, %v, want the upload stamped attached", attached, err)
 	}
 }
 
@@ -172,5 +218,46 @@ func deletingRemovesTheUpload(t *testing.T, harness contractHarness) {
 
 	if err := harness.subject.WriteRepository.DeleteUploadByID(harness.ctx, saved.ID); err != nil {
 		t.Errorf("DeleteUploadByID(already gone) = %v, want nil", err)
+	}
+}
+
+func (h contractHarness) attach(t *testing.T, upload models.Upload) models.Upload {
+	t.Helper()
+
+	attached, err := h.subject.WriteRepository.AttachUpload(h.ctx, models.AttachUploadParams{
+		ID: upload.ID, UserID: upload.UserID, Purpose: upload.Purpose,
+	})
+	if err != nil {
+		t.Fatalf("AttachUpload: %v", err)
+	}
+
+	return attached
+}
+
+func onlyAnUnreferencedUploadIsFound(t *testing.T, harness contractHarness) {
+	unreferenced := harness.attach(t, harness.save(t, ""))
+	referenced := harness.attach(t, harness.save(t, ""))
+	harness.subject.ReferenceUpload(t, referenced)
+
+	found, err := harness.subject.WriteRepository.FindUnreferencedUploadByID(harness.ctx, unreferenced.ID)
+	if err != nil || found.ID != unreferenced.ID || found.OriginalPath != unreferenced.OriginalPath {
+		t.Errorf("FindUnreferencedUploadByID(unreferenced) = %+v, %v, want the upload", found, err)
+	}
+
+	_, err = harness.subject.WriteRepository.FindUnreferencedUploadByID(harness.ctx, referenced.ID)
+	assertUploadNotFound(t, err)
+	_, err = harness.subject.WriteRepository.FindUnreferencedUploadByID(harness.ctx, uuid.New())
+	assertUploadNotFound(t, err)
+}
+
+func aFreshAttachedUploadIsNotOrphanedYet(t *testing.T, harness contractHarness) {
+	harness.attach(t, harness.save(t, ""))
+
+	orphaned, err := harness.subject.WriteRepository.ListOrphanedAttachedUploads(harness.ctx)
+	if err != nil {
+		t.Fatalf("ListOrphanedAttachedUploads: %v", err)
+	}
+	if len(orphaned) != 0 {
+		t.Errorf("orphaned uploads = %+v, want none attached more recently than models.PendingUploadRetention", orphaned)
 	}
 }

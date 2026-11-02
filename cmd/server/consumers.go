@@ -93,6 +93,21 @@ func buildRegistryDependencies(params startEventConsumersParams) consumers.Regis
 		Logger: params.Logger,
 	}
 
+	sendPasswordResetEmailDependencies := usecases.SendPasswordResetEmailDependencies{
+		Gateway:           params.EmailGateway,
+		MessageRepository: params.MessageRepository,
+		EventDispatcher:   params.EventDispatcher,
+		Logger:            params.Logger,
+		FrontendBaseURL:   params.FrontendBaseURL,
+	}
+
+	dependencies.PasswordResetEmail = messaging.PasswordResetEmailDependencies{
+		SendPasswordResetEmail: func(ctx context.Context, sendParams usecases.SendPasswordResetEmailParams) error {
+			return usecases.SendPasswordResetEmail(ctx, sendPasswordResetEmailDependencies, sendParams)
+		},
+		Logger: params.Logger,
+	}
+
 	return dependencies
 }
 

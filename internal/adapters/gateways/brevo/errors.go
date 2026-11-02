@@ -6,8 +6,9 @@ const gatewayNotWiredText = "expected a gateway built by NewEmailGateway"
 const apiKeyMissingText = "expected the account's API key, and not the placeholder config leaves when the variable is unset"
 const senderEmailMissingText = "expected the verified address emails are sent from, and not the placeholder config leaves when the variable is unset"
 const verificationTemplateIDInvalidText = "expected the positive id of the stored template the verification email is rendered from"
-const sendRejectedText = "brevo refused the verification email"
-const sendUnansweredText = "brevo never answered, so whether the verification email was accepted is unknown"
+const passwordResetTemplateIDInvalidText = "expected the positive id of the stored template the password reset email is rendered from"
+const sendRejectedText = "brevo refused the email"
+const sendUnansweredText = "brevo never answered, so whether the email was accepted is unknown"
 
 // ErrGatewayNotWired reports a send through the zero value of EmailGateway.
 type ErrGatewayNotWired struct {
@@ -42,7 +43,17 @@ func (e ErrVerificationTemplateIDInvalid) Error() string {
 		e.TemplateID, verificationTemplateIDInvalidText)
 }
 
-// ErrSendRejected reports a verification email Brevo answered for and refused.
+// ErrPasswordResetTemplateIDInvalid reports a password reset template ID that is not positive.
+type ErrPasswordResetTemplateIDInvalid struct {
+	TemplateID int
+}
+
+func (e ErrPasswordResetTemplateIDInvalid) Error() string {
+	return fmt.Sprintf("invalid brevo password reset template id %d: %s",
+		e.TemplateID, passwordResetTemplateIDInvalidText)
+}
+
+// ErrSendRejected reports an email Brevo answered for and refused.
 type ErrSendRejected struct {
 	RecipientEmail string
 	StatusCode     int

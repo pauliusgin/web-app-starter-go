@@ -2,7 +2,10 @@
 CREATE TABLE users (
   id UUID PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
+  -- NULL for accounts that only sign in with Google.
+  password_hash TEXT,
+  -- Google's stable `sub` claim; unlike the email it never changes for the account.
+  google_subject TEXT UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   email_verified_at TIMESTAMPTZ,
@@ -50,6 +53,8 @@ CREATE TABLE auth_challenges (
 
 CREATE INDEX idx_auth_challenges_user_id ON auth_challenges (user_id);
 
+CREATE INDEX idx_auth_challenges_user_id_purpose_created_at ON auth_challenges (user_id, purpose, created_at);
+
 CREATE TABLE messaging_log (
   id UUID PRIMARY KEY,
   recipient_id UUID NOT NULL,
@@ -72,13 +77,19 @@ CREATE TABLE uploads (
   size_bytes BIGINT NOT NULL,
   width INT,
   height INT,
-  original_path TEXT NOT NULL,
-  original_url TEXT NOT NULL,
+  original_path TEXT,
+  original_url TEXT,
   preview_path TEXT,
   preview_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  attached_at TIMESTAMPTZ
+  attached_at TIMESTAMPTZ,
+  -- Preview-only purposes drop the original once the preview is stored, so an upload may lack
+  -- either file but never both.
+  CONSTRAINT uploads_stores_a_file CHECK (
+    original_path IS NOT NULL
+    OR preview_path IS NOT NULL
+  )
 );
 
 CREATE INDEX idx_uploads_user_id ON uploads (user_id);
@@ -87,16 +98,35 @@ CREATE INDEX idx_uploads_pending_created_at ON uploads (created_at)
 WHERE
   attached_at IS NULL;
 
+CREATE INDEX idx_uploads_attached_at ON uploads (attached_at)
+WHERE
+  attached_at IS NOT NULL;
+
 CREATE TABLE profiles (
   id UUID PRIMARY KEY REFERENCES users (id),
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
+  picture_upload_id UUID REFERENCES uploads (id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   deleted_at TIMESTAMPTZ
 );
 
+CREATE INDEX idx_profiles_picture_upload_id ON profiles (picture_upload_id);
+
+-- Every column pointing at an upload belongs in this view: an upload absent from it counts as
+-- orphaned and its files get deleted. Add a UNION ALL branch per new referencing column.
+CREATE VIEW upload_references AS
+SELECT
+  p.picture_upload_id AS upload_id
+FROM
+  profiles p
+WHERE
+  p.picture_upload_id IS NOT NULL
+  AND p.deleted_at IS NULL;
+
 -- +goose Down
+DROP VIEW upload_references;
 DROP TABLE profiles;
 DROP TABLE uploads;
 DROP TABLE messaging_log;

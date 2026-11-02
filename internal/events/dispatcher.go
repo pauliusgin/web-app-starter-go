@@ -22,30 +22,42 @@ func (d Dispatcher) Dispatch(ctx context.Context, buildEvent EventBuilder) {
 		return
 	}
 
-	recordEvent(ctx, d.Recorder, event)
+	recordEvent(ctx, recordEventParams{Recorder: d.Recorder, Event: event})
 
-	publishEvent(ctx, d.Publisher, event)
+	publishEvent(ctx, publishEventParams{Publisher: d.Publisher, Event: event})
 }
 
-func recordEvent(ctx context.Context, recorder Recorder, event NewEvent) {
-	if recorder == nil {
+type recordEventParams struct {
+	Recorder Recorder
+	Event    NewEvent
+}
+
+func recordEvent(ctx context.Context, params recordEventParams) {
+	event := params.Event
+	if params.Recorder == nil {
 		slog.Error(recorderMissingText, "event", event.Label, "userId", event.UserID)
 		return
 	}
 
-	if err := recorder(ctx, event); err != nil {
+	if err := params.Recorder(ctx, event); err != nil {
 		slog.Error(recordEventFailedText,
 			"event", event.Label, "userId", event.UserID, "error", err)
 	}
 }
 
-func publishEvent(ctx context.Context, publisher Publisher, event NewEvent) {
-	if publisher == nil {
+type publishEventParams struct {
+	Publisher Publisher
+	Event     NewEvent
+}
+
+func publishEvent(ctx context.Context, params publishEventParams) {
+	event := params.Event
+	if params.Publisher == nil {
 		slog.Error(publisherMissingText, "event", event.Label, "userId", event.UserID)
 		return
 	}
 
-	if err := publisher(ctx, event); err != nil {
+	if err := params.Publisher(ctx, event); err != nil {
 		slog.Error(publishEventFailedText,
 			"event", event.Label, "userId", event.UserID, "error", err)
 	}

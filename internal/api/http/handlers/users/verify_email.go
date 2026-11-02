@@ -85,6 +85,5 @@ func writeVerifyEmailFailure(w http.ResponseWriter, err error) {
 		Err:                   err,
 		RuleSets:              [][]handlers.RejectionRule{verifyEmailRules},
 		UnexpectedFailureText: unexpectedVerificationFailureText,
-		RejectedLogText:       verificationRejectedText,
 	})
 }

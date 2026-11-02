@@ -20,6 +20,21 @@ func (e ErrEmailGatewayUnavailable) Unwrap() error {
 	return e.Cause
 }
 
+// ErrGoogleIDTokenVerifierUnavailable reports a google ID token verifier that could not be built from its config.
+type ErrGoogleIDTokenVerifierUnavailable struct {
+	Variables []string
+	Cause     error
+}
+
+func (e ErrGoogleIDTokenVerifierUnavailable) Error() string {
+	return fmt.Sprintf("google ID token verifier unavailable: check %s: %v",
+		strings.Join(e.Variables, ", "), e.Cause)
+}
+
+func (e ErrGoogleIDTokenVerifierUnavailable) Unwrap() error {
+	return e.Cause
+}
+
 // ErrFileStorageUnavailable reports a file storage that could not be built from its config.
 type ErrFileStorageUnavailable struct {
 	Variables []string

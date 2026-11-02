@@ -16,49 +16,53 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	models "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
+	usermodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 )
 
 const accessTokenForTest = "header.payload.signature"
 
-type recordingAccessTokenParser struct {
-	claims        jwt.AccessTokenClaims
-	failure       error
-	receivedCalls []string
+// stubAccessTokenParser parses only accessTokenForTest, so an admitted request proves the header's
+// token is what reached the parser.
+type stubAccessTokenParser struct {
+	claims  jwt.AccessTokenClaims
+	failure error
 }
 
-func (p *recordingAccessTokenParser) parseAccessToken(accessToken string) (jwt.AccessTokenClaims, error) {
-	p.receivedCalls = append(p.receivedCalls, accessToken)
+func (p *stubAccessTokenParser) parseAccessToken(accessToken string) (jwt.AccessTokenClaims, error) {
 	if p.failure != nil {
 		return jwt.AccessTokenClaims{}, p.failure
+	}
+	if accessToken != accessTokenForTest {
+		return jwt.AccessTokenClaims{}, jwt.ErrTokenUnparsable{Cause: errors.New("not the test token")}
 	}
 
 	return p.claims, nil
 }
 
-type recordingUserFinder struct {
-	found         models.User
-	failure       error
-	receivedCalls []uuid.UUID
+// stubUserFinder knows only the found user, so an admitted request proves the claimed id was looked up.
+type stubUserFinder struct {
+	found   usermodels.User
+	failure error
 }
 
-func (f *recordingUserFinder) findUserByID(_ context.Context, id uuid.UUID) (models.User, error) {
-	f.receivedCalls = append(f.receivedCalls, id)
+func (f *stubUserFinder) findUserByID(_ context.Context, id uuid.UUID) (usermodels.User, error) {
 	if f.failure != nil {
-		return models.User{}, f.failure
+		return usermodels.User{}, f.failure
+	}
+	if id != f.found.ID {
+		return usermodels.User{}, usererrors.ErrUserNotFound{}
 	}
 
 	return f.found, nil
 }
 
-type recordingNextHandler struct {
-	ran        bool
+// userReadingNextHandler answers 204 and keeps the user ID the middleware put in the request context.
+type userReadingNextHandler struct {
 	seenUserID uuid.UUID
 	seenUserOK bool
 }
 
-func (h *recordingNextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.ran = true
+func (h *userReadingNextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.seenUserID, h.seenUserOK = UserIDFromContext(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -110,6 +114,15 @@ func (h *capturingLogHandler) singleEntry(t *testing.T) capturedLogEntry {
 	return h.entries[0]
 }
 
+// assertNothingLogged pins that a 401 is answered without a log line; client errors are not server events.
+func (h *capturingLogHandler) assertNothingLogged(t *testing.T) {
+	t.Helper()
+
+	if len(h.entries) != 0 {
+		t.Errorf("logged %d entries, want none for a rejected request", len(h.entries))
+	}
+}
+
 func captureHandlerLogs(t *testing.T) *capturingLogHandler {
 	t.Helper()
 
@@ -121,21 +134,10 @@ func captureHandlerLogs(t *testing.T) *capturingLogHandler {
 	return logs
 }
 
-func loggedErrorAs[T error](t *testing.T, entry capturedLogEntry) T {
-	t.Helper()
-
-	var target T
-	if !errors.As(entry.loggedErr, &target) {
-		t.Fatalf("logged error = %v (%T), want a %T in its chain", entry.loggedErr, entry.loggedErr, target)
-	}
-
-	return target
-}
-
-func authenticatedUserFixture() models.User {
+func authenticatedUserFixture() usermodels.User {
 	createdAt := time.Date(2026, 3, 14, 9, 26, 53, 0, time.UTC)
 
-	return models.User{
+	return usermodels.User{
 		ID:        uuid.MustParse("6f1c9f2e-4a1b-4c3d-9e8f-0a1b2c3d4e5f"),
 		Email:     "accountant@example.com",
 		CreatedAt: createdAt,
@@ -143,7 +145,7 @@ func authenticatedUserFixture() models.User {
 	}
 }
 
-func claimsFor(authenticated models.User) jwt.AccessTokenClaims {
+func claimsFor(authenticated usermodels.User) jwt.AccessTokenClaims {
 	return jwt.AccessTokenClaims{
 		UserID:    authenticated.ID,
 		Email:     authenticated.Email,
@@ -153,18 +155,18 @@ func claimsFor(authenticated models.User) jwt.AccessTokenClaims {
 }
 
 type sendGuardedRequestParams struct {
-	parser        *recordingAccessTokenParser
-	users         *recordingUserFinder
+	parser        *stubAccessTokenParser
+	users         *stubUserFinder
 	authorization string
 	omitHeader    bool
 }
 
-func sendGuardedRequest(t *testing.T, params sendGuardedRequestParams) (*httptest.ResponseRecorder, *recordingNextHandler) {
+func sendGuardedRequest(t *testing.T, params sendGuardedRequestParams) (*httptest.ResponseRecorder, *userReadingNextHandler) {
 	t.Helper()
 
-	next := &recordingNextHandler{}
+	next := &userReadingNextHandler{}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/protected", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/invoices", nil)
 	if !params.omitHeader {
 		request.Header.Set("Authorization", params.authorization)
 	}
@@ -224,8 +226,8 @@ func TestRequireAuthenticatedUserAdmitsATokenNamingALiveUser(t *testing.T) {
 			logs := captureHandlerLogs(t)
 
 			authenticated := authenticatedUserFixture()
-			parser := &recordingAccessTokenParser{claims: claimsFor(authenticated)}
-			users := &recordingUserFinder{found: authenticated}
+			parser := &stubAccessTokenParser{claims: claimsFor(authenticated)}
+			users := &stubUserFinder{found: authenticated}
 
 			recorder, next := sendGuardedRequest(t, sendGuardedRequestParams{
 				parser:        parser,
@@ -233,8 +235,8 @@ func TestRequireAuthenticatedUserAdmitsATokenNamingALiveUser(t *testing.T) {
 				authorization: testCase.scheme + " " + accessTokenForTest,
 			})
 
-			if !next.ran {
-				t.Fatalf("the next handler did not run, want it to run for a valid token; status = %d", recorder.Code)
+			if recorder.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want the next handler's %d for a valid token", recorder.Code, http.StatusNoContent)
 			}
 			if !next.seenUserOK || next.seenUserID != authenticated.ID {
 				t.Errorf("UserIDFromContext = (%s, %t), want (%s, true)", next.seenUserID, next.seenUserOK, authenticated.ID)
@@ -246,12 +248,6 @@ func TestRequireAuthenticatedUserAdmitsATokenNamingALiveUser(t *testing.T) {
 			if challenge := recorder.Header().Get("WWW-Authenticate"); challenge != "" {
 				t.Errorf("WWW-Authenticate = %q, want it absent on an admitted request", challenge)
 			}
-			if len(parser.receivedCalls) != 1 || parser.receivedCalls[0] != accessTokenForTest {
-				t.Errorf("ParseAccessToken received %q, want exactly [%q]", parser.receivedCalls, accessTokenForTest)
-			}
-			if len(users.receivedCalls) != 1 || users.receivedCalls[0] != authenticated.ID {
-				t.Errorf("FindUserByID received %v, want exactly [%s]", users.receivedCalls, authenticated.ID)
-			}
 			if len(logs.entries) != 0 {
 				t.Errorf("logged %d entries, want none for an admitted request", len(logs.entries))
 			}
@@ -261,68 +257,59 @@ func TestRequireAuthenticatedUserAdmitsATokenNamingALiveUser(t *testing.T) {
 
 func TestRequireAuthenticatedUserRejectsRequestsWithoutAUsableBearerToken(t *testing.T) {
 	cases := []struct {
-		name            string
-		authorization   string
-		omitHeader      bool
-		wantChallenge   string
-		wantCode        handlers.ErrorCode
-		wantLoggedError error
+		name          string
+		authorization string
+		omitHeader    bool
+		wantChallenge string
+		wantCode      handlers.ErrorCode
 	}{
 		{
-			name:            "no header",
-			omitHeader:      true,
-			wantChallenge:   tokenRequiredChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenMissing,
-			wantLoggedError: ErrAuthorizationHeaderMissing{},
+			name:          "no header",
+			omitHeader:    true,
+			wantChallenge: tokenRequiredChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenMissing,
 		},
 		{
-			name:            "wrong scheme",
-			authorization:   "Basic abc",
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrUnsupportedAuthorizationScheme{Scheme: "Basic"},
+			name:          "wrong scheme",
+			authorization: "Basic abc",
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
-			name:            "wrong scheme of exactly six characters is logged whole",
-			authorization:   "Digest abc",
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrUnsupportedAuthorizationScheme{Scheme: "Digest"},
+			name:          "wrong scheme of exactly six characters is logged whole",
+			authorization: "Digest abc",
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
-			name:            "wrong scheme longer than six characters is truncated",
-			authorization:   "Negotiate abc",
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrUnsupportedAuthorizationScheme{Scheme: "Negoti..."},
+			name:          "wrong scheme longer than six characters is truncated",
+			authorization: "Negotiate abc",
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
-			name:            "token without a scheme is truncated",
-			authorization:   accessTokenForTest,
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrUnsupportedAuthorizationScheme{Scheme: "header..."},
+			name:          "token without a scheme is truncated",
+			authorization: accessTokenForTest,
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
-			name:            "malformed: scheme only",
-			authorization:   "Bearer",
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrBearerTokenMalformed{},
+			name:          "malformed: scheme only",
+			authorization: "Bearer",
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
-			name:            "malformed: double space before the token",
-			authorization:   "Bearer  " + accessTokenForTest,
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrBearerTokenMalformed{},
+			name:          "malformed: double space before the token",
+			authorization: "Bearer  " + accessTokenForTest,
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
-			name:            "malformed: tab inside the token",
-			authorization:   "Bearer header.payload\t.signature",
-			wantChallenge:   invalidTokenChallenge,
-			wantCode:        handlers.ErrorCodeAccessTokenInvalid,
-			wantLoggedError: ErrBearerTokenMalformed{},
+			name:          "malformed: tab inside the token",
+			authorization: "Bearer header.payload\t.signature",
+			wantChallenge: handlers.InvalidTokenChallenge,
+			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 	}
 
@@ -331,10 +318,10 @@ func TestRequireAuthenticatedUserRejectsRequestsWithoutAUsableBearerToken(t *tes
 			logs := captureHandlerLogs(t)
 
 			authenticated := authenticatedUserFixture()
-			parser := &recordingAccessTokenParser{claims: claimsFor(authenticated)}
-			users := &recordingUserFinder{found: authenticated}
+			parser := &stubAccessTokenParser{claims: claimsFor(authenticated)}
+			users := &stubUserFinder{found: authenticated}
 
-			recorder, next := sendGuardedRequest(t, sendGuardedRequestParams{
+			recorder, _ := sendGuardedRequest(t, sendGuardedRequestParams{
 				parser:        parser,
 				users:         users,
 				authorization: testCase.authorization,
@@ -342,27 +329,8 @@ func TestRequireAuthenticatedUserRejectsRequestsWithoutAUsableBearerToken(t *tes
 			})
 
 			assertRejection(t, recorder, testCase.wantChallenge, testCase.wantCode)
-			if next.ran {
-				t.Error("the next handler ran, want it skipped")
-			}
-			if len(parser.receivedCalls) != 0 {
-				t.Errorf("ParseAccessToken received %q, want nothing: the header never yielded a token",
-					parser.receivedCalls)
-			}
-			if len(users.receivedCalls) != 0 {
-				t.Errorf("FindUserByID was called %d times, want 0", len(users.receivedCalls))
-			}
 
-			entry := logs.singleEntry(t)
-			if entry.level != slog.LevelWarn {
-				t.Errorf("log level = %s, want %s", entry.level, slog.LevelWarn)
-			}
-			if !errors.Is(entry.loggedErr, testCase.wantLoggedError) {
-				t.Errorf("logged error = %#v, want %#v", entry.loggedErr, testCase.wantLoggedError)
-			}
-			if strings.Contains(entry.loggedErr.Error(), accessTokenForTest) {
-				t.Errorf("logged error = %q, want no trace of the access token", entry.loggedErr)
-			}
+			logs.assertNothingLogged(t)
 		})
 	}
 }
@@ -385,13 +353,13 @@ func TestRequireAuthenticatedUserRejectsATokenTheParserRefuses(t *testing.T) {
 		{
 			name:          "unparsable",
 			failure:       jwt.ErrTokenUnparsable{Cause: errors.New(leakedDetail)},
-			wantChallenge: invalidTokenChallenge,
+			wantChallenge: handlers.InvalidTokenChallenge,
 			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 		{
 			name:          "unusable claim",
 			failure:       jwt.ErrClaimUnusable{Claim: "sub", Cause: errors.New(leakedDetail)},
-			wantChallenge: invalidTokenChallenge,
+			wantChallenge: handlers.InvalidTokenChallenge,
 			wantCode:      handlers.ErrorCodeAccessTokenInvalid,
 		},
 	}
@@ -400,32 +368,18 @@ func TestRequireAuthenticatedUserRejectsATokenTheParserRefuses(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			logs := captureHandlerLogs(t)
 
-			parser := &recordingAccessTokenParser{failure: testCase.failure}
-			users := &recordingUserFinder{found: authenticatedUserFixture()}
+			parser := &stubAccessTokenParser{failure: testCase.failure}
+			users := &stubUserFinder{found: authenticatedUserFixture()}
 
-			recorder, next := sendGuardedRequest(t, sendGuardedRequestParams{
+			recorder, _ := sendGuardedRequest(t, sendGuardedRequestParams{
 				parser:        parser,
 				users:         users,
 				authorization: "Bearer " + accessTokenForTest,
 			})
 
 			assertRejection(t, recorder, testCase.wantChallenge, testCase.wantCode)
-			if next.ran {
-				t.Error("the next handler ran, want it skipped")
-			}
-			if len(users.receivedCalls) != 0 {
-				t.Errorf("FindUserByID was called %d times, want 0 for a token that never parsed",
-					len(users.receivedCalls))
-			}
 
-			entry := logs.singleEntry(t)
-			if entry.level != slog.LevelWarn {
-				t.Errorf("log level = %s, want %s", entry.level, slog.LevelWarn)
-			}
-			loggedErrorAs[ErrAccessTokenRejected](t, entry)
-			if !errors.Is(entry.loggedErr, testCase.failure) {
-				t.Errorf("logged error = %v, want it to wrap the parser's %v", entry.loggedErr, testCase.failure)
-			}
+			logs.assertNothingLogged(t)
 		})
 	}
 }
@@ -438,30 +392,17 @@ func TestRequireAuthenticatedUserRejectsATokenNamingADeletedUser(t *testing.T) {
 
 	authenticated := authenticatedUserFixture()
 	lookupFailure := usererrors.ErrUserNotFound{}
-	users := &recordingUserFinder{failure: lookupFailure}
+	users := &stubUserFinder{failure: lookupFailure}
 
-	recorder, next := sendGuardedRequest(t, sendGuardedRequestParams{
-		parser:        &recordingAccessTokenParser{claims: claimsFor(authenticated)},
+	recorder, _ := sendGuardedRequest(t, sendGuardedRequestParams{
+		parser:        &stubAccessTokenParser{claims: claimsFor(authenticated)},
 		users:         users,
 		authorization: "Bearer " + accessTokenForTest,
 	})
 
-	assertRejection(t, recorder, invalidTokenChallenge, handlers.ErrorCodeAccessTokenInvalid)
-	if next.ran {
-		t.Error("the next handler ran, want it skipped for a user that no longer exists")
-	}
+	assertRejection(t, recorder, handlers.InvalidTokenChallenge, handlers.ErrorCodeAccessTokenInvalid)
 
-	entry := logs.singleEntry(t)
-	if entry.level != slog.LevelWarn {
-		t.Errorf("log level = %s, want %s", entry.level, slog.LevelWarn)
-	}
-	userNotFound := loggedErrorAs[ErrAuthenticatedUserNotFound](t, entry)
-	if userNotFound.UserID != authenticated.ID {
-		t.Errorf("ErrAuthenticatedUserNotFound.UserID = %s, want %s", userNotFound.UserID, authenticated.ID)
-	}
-	if !errors.Is(entry.loggedErr, lookupFailure) {
-		t.Errorf("logged error = %v, want it to wrap the lookup's %v", entry.loggedErr, lookupFailure)
-	}
+	logs.assertNothingLogged(t)
 }
 
 func TestRequireAuthenticatedUserAnswersInternalServerErrorWhenTheLookupFails(t *testing.T) {
@@ -471,9 +412,9 @@ func TestRequireAuthenticatedUserAnswersInternalServerErrorWhenTheLookupFails(t 
 	leakedDetail := "dial tcp 127.0.0.1:5432: connect: connection refused"
 	lookupFailure := usererrors.ErrFindUserFailed{Cause: errors.New(leakedDetail)}
 
-	recorder, next := sendGuardedRequest(t, sendGuardedRequestParams{
-		parser:        &recordingAccessTokenParser{claims: claimsFor(authenticated)},
-		users:         &recordingUserFinder{failure: lookupFailure},
+	recorder, _ := sendGuardedRequest(t, sendGuardedRequestParams{
+		parser:        &stubAccessTokenParser{claims: claimsFor(authenticated)},
+		users:         &stubUserFinder{failure: lookupFailure},
 		authorization: "Bearer " + accessTokenForTest,
 	})
 
@@ -483,9 +424,6 @@ func TestRequireAuthenticatedUserAnswersInternalServerErrorWhenTheLookupFails(t 
 	}
 	if challenge := recorder.Header().Get("WWW-Authenticate"); challenge != "" {
 		t.Errorf("WWW-Authenticate = %q, want it absent: a 500 issues no challenge", challenge)
-	}
-	if next.ran {
-		t.Error("the next handler ran, want it skipped")
 	}
 
 	body := decodeErrorResponse(t, recorder)
@@ -517,5 +455,41 @@ func TestUserIDFromContextReportsNoUserOnAPlainContext(t *testing.T) {
 	}
 	if userID != uuid.Nil {
 		t.Errorf("userID = %s, want the nil uuid", userID)
+	}
+}
+
+func TestReadBearerTokenReportsWhyAHeaderIsUnusable(t *testing.T) {
+	cases := []struct {
+		name      string
+		rawHeader string
+		wantToken string
+		wantErr   error
+	}{
+		{name: "bearer token", rawHeader: "Bearer " + accessTokenForTest, wantToken: accessTokenForTest},
+		{name: "scheme case is ignored", rawHeader: "bearer " + accessTokenForTest, wantToken: accessTokenForTest},
+		{name: "no header", rawHeader: "", wantErr: ErrAuthorizationHeaderMissing{}},
+		{name: "wrong scheme", rawHeader: "Basic abc", wantErr: ErrUnsupportedAuthorizationScheme{Scheme: "Basic"}},
+		{name: "wrong scheme of exactly six characters is kept whole", rawHeader: "Digest abc",
+			wantErr: ErrUnsupportedAuthorizationScheme{Scheme: "Digest"}},
+		{name: "wrong scheme longer than six characters is truncated", rawHeader: "Negotiate abc",
+			wantErr: ErrUnsupportedAuthorizationScheme{Scheme: "Negoti..."}},
+		{name: "token without a scheme is truncated", rawHeader: accessTokenForTest,
+			wantErr: ErrUnsupportedAuthorizationScheme{Scheme: "header..."}},
+		{name: "scheme only", rawHeader: "Bearer", wantErr: ErrBearerTokenMalformed{}},
+		{name: "double space before the token", rawHeader: "Bearer  " + accessTokenForTest, wantErr: ErrBearerTokenMalformed{}},
+		{name: "tab inside the token", rawHeader: "Bearer header.payload\t.signature", wantErr: ErrBearerTokenMalformed{}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			token, err := ReadBearerToken(testCase.rawHeader)
+
+			if !errors.Is(err, testCase.wantErr) || token != testCase.wantToken {
+				t.Fatalf("ReadBearerToken = %q, %#v; want %q, %#v", token, err, testCase.wantToken, testCase.wantErr)
+			}
+			if err != nil && strings.Contains(err.Error(), accessTokenForTest) {
+				t.Errorf("error = %q, want no trace of the access token, so it is safe to log", err)
+			}
+		})
 	}
 }

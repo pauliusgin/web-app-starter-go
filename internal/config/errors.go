@@ -13,7 +13,9 @@ const appEnvExpectationText = "expected the app's environment to be set to local
 const brevoApiKeyExpectationText = "expected a Brevo API key, such as xkeysib-..."
 const brevoSenderEmailExpectationText = "expected the address transactional emails are sent from, such as no-reply@example.com"
 const brevoTemplateIDExpectationText = "expected the integer ID of the Brevo email verification template"
+const brevoPasswordResetTemplateIDExpectationText = "expected the integer ID of the Brevo password reset template"
 const firebaseCredentialsExpectationText = "expected the Firebase service account JSON encoded as base64"
+const googleClientIDExpectationText = "expected the google OAuth client ID, such as 1234-abc.apps.googleusercontent.com"
 const firebaseStorageBucketExpectationText = "expected the Firebase storage bucket name, such as my-project.firebasestorage.app"
 
 // ErrFailedIntParse reports an environment variable that was set but is not a number.
@@ -57,4 +59,14 @@ type ErrMissingRequiredVariable struct {
 
 func (e ErrMissingRequiredVariable) Error() string {
 	return fmt.Sprintf("missing %s: %s", e.Variable, e.Expectation)
+}
+
+// ErrAppEnvInvalid reports an app environment variable set to none of the known environments.
+type ErrAppEnvInvalid struct {
+	Variable string
+	RawValue string
+}
+
+func (e ErrAppEnvInvalid) Error() string {
+	return fmt.Sprintf("invalid %s %q: %s", e.Variable, e.RawValue, appEnvExpectationText)
 }

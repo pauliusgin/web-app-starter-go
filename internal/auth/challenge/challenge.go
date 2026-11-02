@@ -7,8 +7,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// Lifetime is how long a generated challenge stays valid.
-const Lifetime = 5 * time.Minute
+// DefaultLifetime is how long a generated challenge stays valid unless its purpose sets its own lifetime.
+const DefaultLifetime = 5 * time.Minute
+
+// PasswordResetLifetime is how long a password reset link stays valid; the user needs time to pick a new password.
+const PasswordResetLifetime = 15 * time.Minute
+
+var lifetimeByPurpose = map[Purpose]time.Duration{
+	PurposePasswordReset: PasswordResetLifetime,
+}
 
 // TargetType names the kind of target a challenge is sent to.
 type TargetType string
@@ -31,6 +38,16 @@ const (
 	// PurposePasswordReset lets the user set a new password without the current one.
 	PurposePasswordReset Purpose = "password_reset"
 )
+
+// LifetimeFor returns how long a challenge minted for the purpose stays valid.
+func LifetimeFor(purpose Purpose) time.Duration {
+	lifetime, overridden := lifetimeByPurpose[purpose]
+	if !overridden {
+		return DefaultLifetime
+	}
+
+	return lifetime
+}
 
 // Challenge is a stored challenge as callers see it, carrying the hash and never the secret.
 type Challenge struct {

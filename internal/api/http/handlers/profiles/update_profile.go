@@ -17,14 +17,22 @@ import (
 )
 
 type updateProfileRequest struct {
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
+	FirstName       string `json:"firstName"`
+	LastName        string `json:"lastName"`
+	PictureUploadID string `json:"pictureUploadId"`
 }
 
 type updateProfileResponse struct {
-	ID        uuid.UUID `json:"id"`
-	FirstName string    `json:"firstName"`
-	LastName  string    `json:"lastName"`
+	ID        uuid.UUID                    `json:"id"`
+	FirstName string                       `json:"firstName"`
+	LastName  string                       `json:"lastName"`
+	Picture   updateProfilePictureResponse `json:"picture"`
+}
+
+type updateProfilePictureResponse struct {
+	UploadID    *uuid.UUID `json:"uploadId"`
+	PreviewURL  *string    `json:"previewUrl"`
+	OriginalURL *string    `json:"originalUrl"`
 }
 
 // UpdateProfileUseCase is the domain call the profile update handler depends on.
@@ -55,18 +63,26 @@ func UpdateProfile(d UpdateProfileDependencies) http.HandlerFunc {
 		}
 
 		profileInput, err := input.ValidateProfileInput(input.ProfileInput{
-			FirstName: request.FirstName,
-			LastName:  request.LastName,
+			FirstName:       request.FirstName,
+			LastName:        request.LastName,
+			PictureUploadID: request.PictureUploadID,
 		})
 		if err != nil {
 			writeUpdateProfileFailure(w, err)
 			return
 		}
 
+		pictureUploadID, err := parsePictureUploadID(profileInput.PictureUploadID)
+		if err != nil {
+			writeUpdateProfileFailure(w, err)
+			return
+		}
+
 		result, err := d.UpdateProfile(r.Context(), usecases.UpdateProfileParams{
-			UserID:    userID,
-			FirstName: profileInput.FirstName,
-			LastName:  profileInput.LastName,
+			UserID:          userID,
+			FirstName:       profileInput.FirstName,
+			LastName:        profileInput.LastName,
+			PictureUploadID: pictureUploadID,
 		})
 		if err != nil {
 			writeUpdateProfileFailure(w, err)
@@ -88,6 +104,11 @@ func buildUpdateProfileResponse(profile models.ProfileReadModel) updateProfileRe
 		ID:        profile.ID,
 		FirstName: profile.FirstName,
 		LastName:  profile.LastName,
+		Picture: updateProfilePictureResponse{
+			UploadID:    profile.Picture.UploadID,
+			PreviewURL:  profile.Picture.PreviewURL,
+			OriginalURL: profile.Picture.OriginalURL,
+		},
 	}
 }
 
@@ -98,8 +119,10 @@ var updateProfileRules = []handlers.RejectionRule{
 
 func writeUpdateProfileFailure(w http.ResponseWriter, err error) {
 	handlers.WriteRejection(w, handlers.WriteRejectionParams{
-		Err:                   err,
-		RuleSets:              [][]handlers.RejectionRule{handlers.RequestDecodingRules, profileValidationRules, updateProfileRules},
+		Err: err,
+		RuleSets: [][]handlers.RejectionRule{
+			handlers.RequestDecodingRules, profileValidationRules, profilePictureRules, updateProfileRules,
+		},
 		UnexpectedFailureText: unexpectedProfileUpdateFailureText,
 	})
 }

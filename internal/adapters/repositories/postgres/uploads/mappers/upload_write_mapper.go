@@ -18,8 +18,8 @@ func UploadMapper(row sqlc.Upload) models.Upload {
 		SizeBytes:    row.SizeBytes,
 		Width:        int(row.Width.Int32),
 		Height:       int(row.Height.Int32),
-		OriginalPath: row.OriginalPath,
-		OriginalURL:  row.OriginalUrl,
+		OriginalPath: row.OriginalPath.String,
+		OriginalURL:  row.OriginalUrl.String,
 		PreviewPath:  row.PreviewPath.String,
 		PreviewURL:   row.PreviewUrl.String,
 		CreatedAt:    row.CreatedAt,
@@ -30,8 +30,7 @@ func UploadMapper(row sqlc.Upload) models.Upload {
 	return mapped
 }
 
-// SaveUploadParamsMapper maps an upload about to be recorded onto the insert query's parameters,
-// storing absent dimensions and preview as NULL.
+// SaveUploadParamsMapper maps a new upload onto insert params, storing absent files and dimensions as NULL.
 func SaveUploadParamsMapper(newUpload models.NewUpload) sqlc.SaveUploadParams {
 	return sqlc.SaveUploadParams{
 		ID:           newUpload.ID,
@@ -42,9 +41,18 @@ func SaveUploadParamsMapper(newUpload models.NewUpload) sqlc.SaveUploadParams {
 		SizeBytes:    newUpload.SizeBytes,
 		Width:        sqlnull.Int32UnlessZero(newUpload.Width),
 		Height:       sqlnull.Int32UnlessZero(newUpload.Height),
-		OriginalPath: newUpload.OriginalPath,
-		OriginalUrl:  newUpload.OriginalURL,
+		OriginalPath: sqlnull.StringUnlessEmpty(newUpload.OriginalPath),
+		OriginalUrl:  sqlnull.StringUnlessEmpty(newUpload.OriginalURL),
 		PreviewPath:  sqlnull.StringUnlessEmpty(newUpload.PreviewPath),
 		PreviewUrl:   sqlnull.StringUnlessEmpty(newUpload.PreviewURL),
+	}
+}
+
+// AttachUploadParamsMapper maps an upload claim onto the attach query's parameters.
+func AttachUploadParamsMapper(params models.AttachUploadParams) sqlc.AttachUploadParams {
+	return sqlc.AttachUploadParams{
+		ID:      params.ID,
+		UserID:  params.UserID,
+		Purpose: string(params.Purpose),
 	}
 }

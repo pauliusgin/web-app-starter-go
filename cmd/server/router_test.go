@@ -1,19 +1,21 @@
 package main
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/brokers/rabbitmq"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 )
 
 func TestBuildRouterDependencies(t *testing.T) {
 	cases := []struct {
 		name      string
 		jwtSecret string
-		wantErr   bool
+		wantErr   error
 	}{
 		{name: "valid secret", jwtSecret: testJWTSecret},
-		{name: "empty secret", jwtSecret: "", wantErr: true},
+		{name: "empty secret", jwtSecret: "", wantErr: jwt.ErrEmptySecret{}},
 	}
 
 	for _, testCase := range cases {
@@ -26,15 +28,8 @@ func TestBuildRouterDependencies(t *testing.T) {
 				JWTSecret:      testCase.jwtSecret,
 			})
 
-			if testCase.wantErr {
-				if err == nil {
-					t.Fatal("buildRouterDependencies = nil error, want an error")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("buildRouterDependencies = %v, want nil", err)
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("buildRouterDependencies = %v, want %v", err, testCase.wantErr)
 			}
 		})
 	}

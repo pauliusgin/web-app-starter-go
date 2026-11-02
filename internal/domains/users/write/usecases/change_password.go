@@ -20,7 +20,7 @@ type ChangePasswordParams struct {
 	NewPassword     string
 }
 
-// ChangePasswordDependencies carries the collaborators changing a password needs.
+// ChangePasswordDependencies carries the user store holding the password hash and the dispatcher announcing the change.
 type ChangePasswordDependencies struct {
 	UserWriteRepository repositories.UserRepository
 	EventDispatcher     events.Dispatcher
@@ -31,6 +31,9 @@ func ChangePassword(ctx context.Context, d ChangePasswordDependencies, params Ch
 	credentials, err := d.UserWriteRepository.FindUserCredentialsByID(ctx, params.UserID)
 	if err != nil {
 		return err
+	}
+	if !credentials.HasPassword() {
+		return e.ErrPasswordNotSet{UserID: credentials.ID}
 	}
 
 	if err := ensurePasswordReplaceable(credentials.PasswordHash, params); err != nil {

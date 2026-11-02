@@ -12,7 +12,7 @@ const MinPasswordLength = 8
 // MaxPasswordLength is the longest password accepted, in runes.
 const MaxPasswordLength = 64
 
-// ValidatePassword checks that password is MinPasswordLength to MaxPasswordLength runes long and holds no whitespace, reporting the first failure.
+// ValidatePassword reports the first failure of a password outside the rune bounds or holding whitespace.
 func ValidatePassword(password string) error {
 	passwordLength := utf8.RuneCountInString(password)
 	if passwordLength < MinPasswordLength {

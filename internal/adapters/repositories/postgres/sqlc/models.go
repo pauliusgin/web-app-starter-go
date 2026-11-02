@@ -49,12 +49,13 @@ type MessagingLog struct {
 }
 
 type Profile struct {
-	ID        uuid.UUID
-	FirstName string
-	LastName  string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt sql.NullTime
+	ID              uuid.UUID
+	FirstName       string
+	LastName        string
+	PictureUploadID uuid.NullUUID
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       sql.NullTime
 }
 
 type RefreshToken struct {
@@ -75,8 +76,8 @@ type Upload struct {
 	SizeBytes    int64
 	Width        sql.NullInt32
 	Height       sql.NullInt32
-	OriginalPath string
-	OriginalUrl  string
+	OriginalPath sql.NullString
+	OriginalUrl  sql.NullString
 	PreviewPath  sql.NullString
 	PreviewUrl   sql.NullString
 	CreatedAt    time.Time
@@ -84,10 +85,15 @@ type Upload struct {
 	AttachedAt   sql.NullTime
 }
 
+type UploadReference struct {
+	UploadID uuid.NullUUID
+}
+
 type User struct {
 	ID              uuid.UUID
 	Email           string
-	PasswordHash    string
+	PasswordHash    sql.NullString
+	GoogleSubject   sql.NullString
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	EmailVerifiedAt sql.NullTime

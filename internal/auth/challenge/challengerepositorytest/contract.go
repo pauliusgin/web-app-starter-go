@@ -35,6 +35,7 @@ func RunChallengeRepositoryContract(t *testing.T, params RunChallengeRepositoryC
 		{name: "used challenge is no longer found", run: usedChallengeIsNoLongerFound},
 		{name: "expired challenge is not found", run: expiredChallengeIsNotFound},
 		{name: "marking a used challenge again is not an error", run: markingAUsedChallengeAgainIsNotAnError},
+		{name: "created-at lists are filtered and oldest first", run: createdAtListsAreFilteredAndOldestFirst},
 	}
 
 	for _, testCase := range cases {
@@ -83,7 +84,7 @@ func (h contractHarness) saveLive(t *testing.T, tokenHash string) challenge.Chal
 	return h.save(t, saveForContractParams{
 		TokenHash: tokenHash,
 		Target:    "owner@example.com",
-		Purpose:   challenge.PurposeEmailVerification,
+		Purpose:   challenge.PurposePasswordReset,
 		ExpiresAt: time.Now().Add(time.Hour),
 	})
 }
@@ -124,7 +125,7 @@ func expiredChallengeIsNotFound(t *testing.T, harness contractHarness) {
 	harness.save(t, saveForContractParams{
 		TokenHash: "expired-hash",
 		Target:    "owner@example.com",
-		Purpose:   challenge.PurposeEmailVerification,
+		Purpose:   challenge.PurposePasswordReset,
 		ExpiresAt: time.Now().Add(-time.Minute),
 	})
 
@@ -141,5 +142,52 @@ func markingAUsedChallengeAgainIsNotAnError(t *testing.T, harness contractHarnes
 	}
 	if err := harness.subject.WriteRepository.MarkUsed(harness.ctx, uuid.New()); err != nil {
 		t.Errorf("MarkUsed(unknown) = %v, want nil", err)
+	}
+}
+
+func createdAtListsAreFilteredAndOldestFirst(t *testing.T, harness contractHarness) {
+	listedAfter := time.Now().Add(-time.Hour)
+	expiresAt := time.Now().Add(time.Hour)
+	first := harness.save(t, saveForContractParams{TokenHash: "first", Target: "a@example.com",
+		Purpose: challenge.PurposePasswordReset, ExpiresAt: expiresAt})
+	otherTarget := harness.save(t, saveForContractParams{TokenHash: "other-target", Target: "b@example.com",
+		Purpose: challenge.PurposePasswordReset, ExpiresAt: expiresAt})
+	second := harness.save(t, saveForContractParams{TokenHash: "second", Target: "a@example.com",
+		Purpose: challenge.PurposePasswordReset, ExpiresAt: expiresAt})
+	harness.save(t, saveForContractParams{TokenHash: "other-purpose", Target: "a@example.com",
+		Purpose: challenge.PurposePhoneVerification, ExpiresAt: expiresAt})
+
+	byTarget, err := harness.subject.ReadRepository.ListCreatedAtByTarget(harness.ctx, challenge.ListCreatedAtByTargetParams{
+		UserID:       harness.userID,
+		Target:       "a@example.com",
+		Purpose:      challenge.PurposePasswordReset,
+		CreatedAfter: listedAfter,
+	})
+	if err != nil {
+		t.Fatalf("ListCreatedAtByTarget: %v", err)
+	}
+	assertCreatedAt(t, byTarget, []time.Time{first.CreatedAt, second.CreatedAt})
+
+	byUser, err := harness.subject.ReadRepository.ListCreatedAtByUser(harness.ctx, challenge.ListCreatedAtByUserParams{
+		UserID:       harness.userID,
+		Purpose:      challenge.PurposePasswordReset,
+		CreatedAfter: listedAfter,
+	})
+	if err != nil {
+		t.Fatalf("ListCreatedAtByUser: %v", err)
+	}
+	assertCreatedAt(t, byUser, []time.Time{first.CreatedAt, otherTarget.CreatedAt, second.CreatedAt})
+}
+
+func assertCreatedAt(t *testing.T, got []time.Time, want []time.Time) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("created at = %v, want %v", got, want)
+	}
+	for index := range want {
+		if !got[index].Equal(want[index]) {
+			t.Errorf("created at[%d] = %v, want %v (oldest first)", index, got[index], want[index])
+		}
 	}
 }

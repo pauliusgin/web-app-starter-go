@@ -21,14 +21,15 @@ type signUpUserRequest struct {
 }
 
 type signUpUserResponse struct {
-	ID              uuid.UUID  `json:"id"`
-	Email           string     `json:"email"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
-	SigninAt        *time.Time `json:"signinAt"`
-	FirstName       *string    `json:"firstName"`
-	LastName        *string    `json:"lastName"`
-	AccessToken     string     `json:"accessToken"`
+	ID              uuid.UUID                 `json:"id"`
+	Email           string                    `json:"email"`
+	CreatedAt       time.Time                 `json:"createdAt"`
+	EmailVerifiedAt *time.Time                `json:"emailVerifiedAt"`
+	SigninAt        *time.Time                `json:"signinAt"`
+	FirstName       *string                   `json:"firstName"`
+	LastName        *string                   `json:"lastName"`
+	SignInMethods   []readmodels.SignInMethod `json:"signInMethods"`
+	AccessToken     string                    `json:"accessToken"`
 }
 
 // SignUpUserUseCase is the domain call the signup handler depends on.
@@ -102,6 +103,7 @@ func buildSignUpUserResponse(user readmodels.UserReadModel, accessToken string) 
 		SigninAt:        user.SigninAt,
 		FirstName:       user.FirstName,
 		LastName:        user.LastName,
+		SignInMethods:   user.SignInMethods,
 		AccessToken:     accessToken,
 	}
 }

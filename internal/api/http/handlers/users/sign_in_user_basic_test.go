@@ -1,278 +1,124 @@
 package users
 
 import (
-	"context"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
 	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
 
-const signInBodyForTest = `{"email":"accountant@example.com","password":"correct-horse"}`
-
-var signedInAtForTest = time.Date(2026, 3, 15, 8, 30, 0, 0, time.UTC)
-
-var signedInUserForTest = models.User{
-	ID:        uuid.MustParse("6f1c9f2e-4a1b-4c3d-9e8f-0a1b2c3d4e5f"),
-	Email:     "accountant@example.com",
-	CreatedAt: time.Date(2026, 3, 14, 9, 26, 53, 0, time.UTC),
-	UpdatedAt: signedInAtForTest,
-	SigninAt:  signedInAtForTest,
-}
-
-func signInAsSignedInUser(context.Context, usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-	return usecases.SignInUserResult{User: signedInUserForTest}, nil
-}
-
-func findSignedInUserReadModel(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
-	return readmodels.UserReadModel{
-		ID:        id,
-		Email:     signedInUserForTest.Email,
-		CreatedAt: signedInUserForTest.CreatedAt,
-		SigninAt:  &signedInAtForTest,
-	}, nil
-}
-
-func newWorkingSignInDependencies(t *testing.T) SignInUserDependencies {
+func sendSignIn(t *testing.T, stores *userStores, body string) *http.Response {
 	t.Helper()
 
-	return SignInUserDependencies{
-		SignInUser:           signInAsSignedInUser,
-		GetUserReadModelByID: findSignedInUserReadModel,
-		IssueRefreshToken:    issueRefreshTokenForTest,
-		Jwt:                  newAccessTokenIssuerForTest(t),
-	}
-}
-
-type signInRequestParams struct {
-	Body         string
-	Dependencies SignInUserDependencies
-}
-
-func signInWithDependencies(t *testing.T, params signInRequestParams) *http.Response {
-	t.Helper()
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/users/signin", strings.NewReader(params.Body))
-	request.Header.Set("Content-Type", "application/json")
-
-	SignInUser(params.Dependencies)(recorder, request)
-
-	response := recorder.Result()
-	t.Cleanup(func() { response.Body.Close() })
-
-	return response
-}
-
-type assertSignInRefusedParams struct {
-	response   *http.Response
-	wantStatus int
-	wantCode   handlers.ErrorCode
-}
-
-func assertSignInRefused(t *testing.T, params assertSignInRefusedParams) {
-	t.Helper()
-
-	if params.response.StatusCode != params.wantStatus {
-		t.Fatalf("status = %d, want %d", params.response.StatusCode, params.wantStatus)
-	}
-
-	body := decodeBody(t, params.response)
-	if code, _ := body["code"].(string); code != string(params.wantCode) {
-		t.Errorf(`body["code"] = %q, want %q`, code, params.wantCode)
-	}
-	if message, _ := body["message"].(string); message == "" {
-		t.Error(`body["message"] is empty, want a message`)
-	}
-	if body["accessToken"] != nil || body["refreshToken"] != nil {
-		t.Errorf("response carries tokens %v, want none", body)
-	}
-	assertNoRefreshTokenCookie(t, params.response)
-}
-
-func TestSignInUserAnswersWithTheReadModelAndAFreshTokenPair(t *testing.T) {
-	dependencies := newWorkingSignInDependencies(t)
-
-	response := signInWithDependencies(t, signInRequestParams{
-		Body:         signInBodyForTest,
-		Dependencies: dependencies,
+	return sendUserRequest(t, sendUserRequestParams{
+		handler: stores.signInHandler(),
+		method:  http.MethodPost,
+		path:    "/api/v1/users/signin",
+		body:    body,
 	})
+}
+
+func TestSignInUserAnswersTheReadModelAndAFreshTokenPair(t *testing.T) {
+	stores := newUserStores(t)
+	userID := stores.seedUser(t, seedUserParams{email: testEmail})
+
+	response := sendSignIn(t, stores, `{"email":"  Accountant@Example.COM ","password":"correct-horse"}`)
 
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
 	}
-
 	body := decodeBody(t, response)
-	if body["id"] != signedInUserForTest.ID.String() {
-		t.Errorf("id = %v, want %s", body["id"], signedInUserForTest.ID)
+	if body["id"] != userID.String() || body["email"] != testEmail {
+		t.Errorf("id/email = %v/%v, want the seeded user", body["id"], body["email"])
 	}
-	if body["email"] != signedInUserForTest.Email {
-		t.Errorf("email = %v, want %q", body["email"], signedInUserForTest.Email)
+	assertSignInMethods(t, body, readmodels.SignInMethodEmailPassword)
+	signedInAt, err := time.Parse(time.RFC3339, fmt.Sprint(body["signinAt"]))
+	if err != nil || !signedInAt.After(seededAt) {
+		t.Errorf("signinAt = %v, want a fresh stamp past the seeded %s", body["signinAt"], seededAt)
 	}
-	if body["signinAt"] != signedInAtForTest.Format(time.RFC3339) {
-		t.Errorf("signinAt = %v, want %s", body["signinAt"], signedInAtForTest.Format(time.RFC3339))
+	for _, key := range []string{"emailVerifiedAt", "firstName", "lastName"} {
+		if value, present := body[key]; !present || value != nil {
+			t.Errorf("body[%q] = %v (present %v), want null", key, value, present)
+		}
 	}
 	if _, carriesUpdatedAt := body["updatedAt"]; carriesUpdatedAt {
 		t.Error("response carries updatedAt, want only the read model's fields")
 	}
-	if _, carriesRefreshToken := body["refreshToken"]; carriesRefreshToken {
-		t.Error("response body carries refreshToken, want it only in the cookie")
-	}
 	assertRefreshTokenCookieSet(t, response)
 
 	accessToken, _ := body["accessToken"].(string)
-	claims, err := dependencies.Jwt.ParseAccessToken(accessToken)
-	if err != nil {
-		t.Fatalf("parsing the issued access token: %v", err)
-	}
-	if claims.UserID != signedInUserForTest.ID {
-		t.Errorf("access token subject = %s, want %s", claims.UserID, signedInUserForTest.ID)
+	claims, err := stores.jwt.ParseAccessToken(accessToken)
+	if err != nil || claims.UserID != userID {
+		t.Errorf("access token subject = %s (%v), want %s", claims.UserID, err, userID)
 	}
 }
 
-func TestSignInUserAnswersNullForWhatTheUserHasNotRecordedYet(t *testing.T) {
-	response := signInWithDependencies(t, signInRequestParams{
-		Body:         signInBodyForTest,
-		Dependencies: newWorkingSignInDependencies(t),
-	})
+func TestSignInUserAnswersTheProfileNames(t *testing.T) {
+	stores := newUserStores(t)
+	userID := stores.seedUser(t, seedUserParams{email: testEmail})
+	stores.profileNames[userID] = [2]string{"Ada", "Lovelace"}
 
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
-	}
+	response := sendSignIn(t, stores, `{"email":"accountant@example.com","password":"correct-horse"}`)
 
 	body := decodeBody(t, response)
-	for _, key := range []string{"emailVerifiedAt", "firstName", "lastName"} {
-		value, present := body[key]
-		if !present || value != nil {
-			t.Errorf("%s = %v (present %t), want present as null", key, value, present)
-		}
+	if body["firstName"] != "Ada" || body["lastName"] != "Lovelace" {
+		t.Errorf("names = %v %v, want Ada Lovelace", body["firstName"], body["lastName"])
 	}
 }
 
-func TestSignInUserRefusesInvalidCredentialsAsUnauthorized(t *testing.T) {
-	dependencies := newWorkingSignInDependencies(t)
-	dependencies.SignInUser = func(context.Context, usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-		return usecases.SignInUserResult{}, usererrors.ErrCredentialsInvalid{}
-	}
-
-	response := signInWithDependencies(t, signInRequestParams{
-		Body:         signInBodyForTest,
-		Dependencies: dependencies,
-	})
-
-	assertSignInRefused(t, assertSignInRefusedParams{
-		response:   response,
-		wantStatus: http.StatusUnauthorized,
-		wantCode:   handlers.ErrorCodeInvalidCredentials,
-	})
-}
-
-func TestSignInUserRefusesBadRequestsBeforeSigningIn(t *testing.T) {
+func TestSignInUserRejectsWithoutTokens(t *testing.T) {
 	cases := []struct {
-		name     string
-		body     string
-		wantCode handlers.ErrorCode
+		name       string
+		body       string
+		wantStatus int
+		wantCode   handlers.ErrorCode
 	}{
-		{name: "undecodable body", body: `{"email":`, wantCode: handlers.ErrorCodeRequestBodyInvalid},
-		{name: "invalid email", body: `{"email":"not-an-email","password":"correct-horse"}`,
-			wantCode: handlers.ErrorCodeEmailInvalid},
-		{name: "missing password", body: `{"email":"accountant@example.com"}`,
-			wantCode: handlers.ErrorCodePasswordMissing},
+		{name: "malformed json", body: `{"email":`, wantStatus: http.StatusBadRequest, wantCode: handlers.ErrorCodeRequestBodyInvalid},
+		{
+			name:       "invalid email",
+			body:       `{"email":"not-an-email","password":"correct-horse"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   handlers.ErrorCodeEmailInvalid,
+		},
+		{
+			name:       "missing password",
+			body:       `{"email":"accountant@example.com"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   handlers.ErrorCodePasswordMissing,
+		},
+		{
+			name:       "wrong password",
+			body:       `{"email":"accountant@example.com","password":"wrong-horse"}`,
+			wantStatus: http.StatusUnauthorized,
+			wantCode:   handlers.ErrorCodeInvalidCredentials,
+		},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			signInAttempted := false
-			dependencies := newWorkingSignInDependencies(t)
-			dependencies.SignInUser = func(ctx context.Context, params usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-				signInAttempted = true
-				return signInAsSignedInUser(ctx, params)
-			}
+			stores := newUserStores(t)
+			stores.seedUser(t, seedUserParams{email: testEmail})
 
-			response := signInWithDependencies(t, signInRequestParams{
-				Body:         testCase.body,
-				Dependencies: dependencies,
-			})
+			response := sendSignIn(t, stores, testCase.body)
 
-			assertSignInRefused(t, assertSignInRefusedParams{
-				response:   response,
-				wantStatus: http.StatusBadRequest,
-				wantCode:   testCase.wantCode,
-			})
-			if signInAttempted {
-				t.Error("sign-in attempted with a request the handler should have rejected")
-			}
+			assertErrorCode(t, response, testCase.wantStatus, testCase.wantCode)
+			assertNoRefreshTokenCookie(t, response)
 		})
 	}
 }
 
-func TestSignInUserAnswersUnexpectedFailuresWithAGenericError(t *testing.T) {
-	cases := []struct {
-		name   string
-		breaks func(dependencies *SignInUserDependencies)
-	}{
-		{name: "sign-in fails", breaks: func(dependencies *SignInUserDependencies) {
-			dependencies.SignInUser = func(context.Context, usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-				return usecases.SignInUserResult{}, errCollaboratorFailedForTest
-			}
-		}},
-		{name: "read model is missing after the stamp", breaks: func(dependencies *SignInUserDependencies) {
-			dependencies.GetUserReadModelByID = func(context.Context, uuid.UUID) (readmodels.UserReadModel, error) {
-				return readmodels.UserReadModel{}, usererrors.ErrUserNotFound{}
-			}
-		}},
-		{name: "access token issuing fails", breaks: func(dependencies *SignInUserDependencies) {
-			dependencies.Jwt = refusingAccessTokenIssuer{}
-		}},
-	}
+func TestSignInUserAnswersInternalErrorWhenTheLookupFails(t *testing.T) {
+	silenceHandlerLogger(t)
+	stores := newUserStores(t)
+	stores.seedUser(t, seedUserParams{email: testEmail})
+	stores.users.LookupFailure = usererrors.ErrFindUserFailed{Cause: errDatabaseDown}
 
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			silenceHandlerLogger(t)
+	response := sendSignIn(t, stores, `{"email":"accountant@example.com","password":"correct-horse"}`)
 
-			dependencies := newWorkingSignInDependencies(t)
-			testCase.breaks(&dependencies)
-
-			response := signInWithDependencies(t, signInRequestParams{
-				Body:         signInBodyForTest,
-				Dependencies: dependencies,
-			})
-
-			assertSignInRefused(t, assertSignInRefusedParams{
-				response:   response,
-				wantStatus: http.StatusInternalServerError,
-				wantCode:   handlers.ErrorCodeInternal,
-			})
-		})
-	}
-}
-
-func TestSignInUserNormalizesTheEmailBeforeSigningIn(t *testing.T) {
-	var signedInEmails []string
-	dependencies := newWorkingSignInDependencies(t)
-	dependencies.SignInUser = func(ctx context.Context, params usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-		signedInEmails = append(signedInEmails, params.Email)
-		return signInAsSignedInUser(ctx, params)
-	}
-
-	response := signInWithDependencies(t, signInRequestParams{
-		Body:         `{"email":"  Bob@Example.COM ","password":"correct-horse"}`,
-		Dependencies: dependencies,
-	})
-
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
-	}
-	if len(signedInEmails) != 1 || signedInEmails[0] != "bob@example.com" {
-		t.Errorf("signed in emails = %q, want [\"bob@example.com\"]", signedInEmails)
-	}
+	assertErrorCode(t, response, http.StatusInternalServerError, handlers.ErrorCodeInternal)
+	assertNoRefreshTokenCookie(t, response)
 }

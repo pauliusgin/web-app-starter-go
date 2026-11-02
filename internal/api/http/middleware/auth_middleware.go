@@ -17,21 +17,17 @@ import (
 )
 
 const (
-	authorizationHeader   = "Authorization"
-	wwwAuthenticateHeader = "WWW-Authenticate"
-	bearerScheme          = "Bearer"
+	authorizationHeader = "Authorization"
+	bearerScheme        = "Bearer"
 )
 
 const (
 	tokenRequiredChallenge  = "Bearer"
-	invalidTokenChallenge   = `Bearer error="invalid_token"`
 	expiredTokenChallenge   = `Bearer error="invalid_token", error_description="the access token expired"`
 	accessTokenRequiredText = "an access token is required"
 	accessTokenExpiredText  = "the access token expired"
 	invalidAccessTokenText  = "invalid access token"
 )
-
-const authenticationRejectedText = "rejected an unauthenticated request"
 
 const unexpectedAuthenticationFailureText = "could not authenticate the request"
 
@@ -41,7 +37,7 @@ type ParseAccessToken func(accessToken string) (jwt.AccessTokenClaims, error)
 // FindUserByID is the user lookup call the authentication middleware depends on.
 type FindUserByID func(ctx context.Context, id uuid.UUID) (models.User, error)
 
-// RequireAuthenticatedUserDependencies carries the collaborators the middleware uses.
+// RequireAuthenticatedUserDependencies carries the access token parser and the lookup confirming the user still exists.
 type RequireAuthenticatedUserDependencies struct {
 	ParseAccessToken ParseAccessToken
 	FindUserByID     FindUserByID
@@ -64,7 +60,7 @@ func RequireAuthenticatedUser(d RequireAuthenticatedUserDependencies) func(http.
 			}
 
 			if _, err := d.FindUserByID(r.Context(), claims.UserID); err != nil {
-				writeUserLookupFailure(w, claims.UserID, err)
+				writeUserLookupFailure(w, writeUserLookupFailureParams{UserID: claims.UserID, Err: err})
 				return
 			}
 
@@ -102,14 +98,19 @@ func truncateScheme(scheme string) string {
 	return string(schemeRunes[:maxLoggedSchemeLength]) + "..."
 }
 
-func writeUserLookupFailure(w http.ResponseWriter, userID uuid.UUID, err error) {
+type writeUserLookupFailureParams struct {
+	UserID uuid.UUID
+	Err    error
+}
+
+func writeUserLookupFailure(w http.ResponseWriter, params writeUserLookupFailureParams) {
 	userNotFound := usererrors.ErrUserNotFound{}
-	if errors.As(err, &userNotFound) {
-		writeUnauthorized(w, ErrAuthenticatedUserNotFound{UserID: userID, Cause: err})
+	if errors.As(params.Err, &userNotFound) {
+		writeUnauthorized(w, ErrAuthenticatedUserNotFound{UserID: params.UserID, Cause: params.Err})
 		return
 	}
 
-	slog.Error(unexpectedAuthenticationFailureText, "error", err)
+	slog.Error(unexpectedAuthenticationFailureText, "error", params.Err)
 	handlers.WriteJSON(w, http.StatusInternalServerError, handlers.ErrorResponse{
 		Code:    handlers.ErrorCodeInternal,
 		Message: unexpectedAuthenticationFailureText,
@@ -117,10 +118,8 @@ func writeUserLookupFailure(w http.ResponseWriter, userID uuid.UUID, err error) 
 }
 
 func writeUnauthorized(w http.ResponseWriter, err error) {
-	slog.Warn(authenticationRejectedText, "error", err)
-
 	challenge := selectUnauthorizedChallenge(err)
-	w.Header().Set(wwwAuthenticateHeader, challenge.header)
+	w.Header().Set(handlers.WWWAuthenticateHeader, challenge.header)
 	handlers.WriteJSON(w, http.StatusUnauthorized, handlers.ErrorResponse{Code: challenge.code, Message: challenge.body})
 }
 
@@ -131,11 +130,11 @@ type unauthorizedChallenge struct {
 }
 
 func selectUnauthorizedChallenge(err error) unauthorizedChallenge {
-	headerAbsent := ErrAuthorizationHeaderMissing{}
+	headerMissing := ErrAuthorizationHeaderMissing{}
 	tokenExpired := jwt.ErrTokenExpired{}
 
 	switch {
-	case errors.As(err, &headerAbsent):
+	case errors.As(err, &headerMissing):
 		return unauthorizedChallenge{
 			header: tokenRequiredChallenge,
 			code:   handlers.ErrorCodeAccessTokenMissing,
@@ -149,7 +148,7 @@ func selectUnauthorizedChallenge(err error) unauthorizedChallenge {
 		}
 	default:
 		return unauthorizedChallenge{
-			header: invalidTokenChallenge,
+			header: handlers.InvalidTokenChallenge,
 			code:   handlers.ErrorCodeAccessTokenInvalid,
 			body:   invalidAccessTokenText,
 		}

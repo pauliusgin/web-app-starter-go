@@ -71,9 +71,15 @@ var requestEmailChangeRules = []handlers.RejectionRule{
 }
 
 func writeRequestEmailChangeFailure(w http.ResponseWriter, err error) {
+	handlers.WriteRetryAfterHeader(w, err)
 	handlers.WriteRejection(w, handlers.WriteRejectionParams{
-		Err:                   err,
-		RuleSets:              [][]handlers.RejectionRule{handlers.RequestDecodingRules, emailValidationRules, requestEmailChangeRules},
+		Err: err,
+		RuleSets: [][]handlers.RejectionRule{
+			handlers.RequestDecodingRules,
+			emailValidationRules,
+			requestEmailChangeRules,
+			handlers.VerificationEmailRateLimitRules,
+		},
 		UnexpectedFailureText: unexpectedEmailChangeRequestFailureText,
 	})
 }

@@ -12,29 +12,33 @@ import (
 type MessageType string
 
 const (
+	// EmailVerification carries the link that verifies a user's email address.
 	EmailVerification MessageType = "email_verification"
+	// PasswordReset carries the link that lets a user set a new password without the current one.
+	PasswordReset MessageType = "password_reset"
 )
 
 // Method is the channel a message is delivered through.
 type Method string
 
 const (
+	// MethodEmail delivers the message by email.
 	MethodEmail Method = "email"
-
+	// MethodSMS delivers the message as a text message.
 	MethodSMS Method = "sms"
-
+	// MethodPush delivers the message as a mobile push notification.
 	MethodPush Method = "push"
-
+	// MethodInApp delivers the message inside the application.
 	MethodInApp Method = "in_app"
 )
 
 // Status is the outcome of handing a message to its delivery provider.
 type Status string
 
-// StatusSent marks a message the provider accepted.
 const (
+	// StatusSent marks a message the provider accepted.
 	StatusSent Status = "sent"
-
+	// StatusFailed marks a message the provider rejected or could not be reached for.
 	StatusFailed Status = "failed"
 )
 

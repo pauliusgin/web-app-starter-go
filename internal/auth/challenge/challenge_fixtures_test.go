@@ -1,7 +1,6 @@
 package challenge
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -25,45 +24,6 @@ func challengesForUser(repository *InMemoryChallengeRepository, userID uuid.UUID
 	}
 
 	return found
-}
-
-type capturedEvents struct {
-	recorded  []events.NewEvent
-	published []events.NewEvent
-}
-
-func (c *capturedEvents) recorder() events.Recorder {
-	return func(_ context.Context, event events.NewEvent) error {
-		c.recorded = append(c.recorded, event)
-		return nil
-	}
-}
-
-func (c *capturedEvents) publisher() events.Publisher {
-	return func(_ context.Context, event events.NewEvent) error {
-		c.published = append(c.published, event)
-		return nil
-	}
-}
-
-func (c *capturedEvents) onlyRecorded(t *testing.T) events.NewEvent {
-	t.Helper()
-
-	if len(c.recorded) != 1 {
-		t.Fatalf("recorded events = %d, want 1", len(c.recorded))
-	}
-
-	return c.recorded[0]
-}
-
-func (c *capturedEvents) onlyPublished(t *testing.T) events.NewEvent {
-	t.Helper()
-
-	if len(c.published) != 1 {
-		t.Fatalf("published events = %d, want 1", len(c.published))
-	}
-
-	return c.published[0]
 }
 
 func tokenFromEventData(t *testing.T, event events.NewEvent) string {

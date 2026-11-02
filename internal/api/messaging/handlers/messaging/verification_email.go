@@ -17,7 +17,7 @@ type SendVerificationEmail func(
 	params usecases.SendVerificationEmailParams,
 ) error
 
-// VerificationEmailDependencies carries the collaborators the verification email handler needs.
+// VerificationEmailDependencies carries the use case mailing the link and the logger skipped challenges are noted in.
 type VerificationEmailDependencies struct {
 	SendVerificationEmail SendVerificationEmail
 	Logger                *slog.Logger

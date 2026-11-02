@@ -1,6 +1,7 @@
 package primitive
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -35,7 +36,7 @@ func TestValidatePassword(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			err := ValidatePassword(testCase.password)
 
-			if err != testCase.wantErr {
+			if !errors.Is(err, testCase.wantErr) {
 				t.Fatalf("error = %v, want %v", err, testCase.wantErr)
 			}
 		})

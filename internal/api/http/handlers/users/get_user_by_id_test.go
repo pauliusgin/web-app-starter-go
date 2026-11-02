@@ -1,129 +1,92 @@
 package users
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
 	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/queries"
 )
 
-var currentUserIDForTest = uuid.MustParse("2b8f4d6a-1c3e-4a5b-9d7f-6e0a1b2c3d4e")
-
-var currentUserCreatedAtForTest = time.Date(2026, time.March, 14, 9, 26, 53, 0, time.UTC)
-
-func getCurrentUserReadModel(_ context.Context, params queries.GetUserByIDParams) (queries.GetUserByIDResult, error) {
-	return queries.GetUserByIDResult{User: readmodels.UserReadModel{
-		ID:        params.UserID,
-		Email:     "accountant@example.com",
-		CreatedAt: currentUserCreatedAtForTest,
-	}}, nil
-}
-
-type sendGetUserByIDParams struct {
-	getUserByID GetUserByIDUseCase
-	skipGuard   bool
-}
-
-func sendGetUserByID(t *testing.T, params sendGetUserByIDParams) *http.Response {
+func sendGetUserByID(t *testing.T, stores *userStores, userID uuid.UUID) *http.Response {
 	t.Helper()
 
-	var served http.Handler = GetUserByID(GetUserByIDDependencies{GetUserByID: params.getUserByID})
-	if !params.skipGuard {
-		served = authenticateForTest(currentUserIDForTest)(served)
-	}
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
-	request.Header.Set("Authorization", "Bearer header.payload.signature")
-
-	served.ServeHTTP(recorder, request)
-
-	response := recorder.Result()
-	t.Cleanup(func() { response.Body.Close() })
-
-	return response
+	return sendUserRequest(t, sendUserRequestParams{
+		handler:  stores.getUserByIDHandler(),
+		method:   http.MethodGet,
+		path:     "/api/v1/users/me",
+		asUserID: userID,
+	})
 }
 
-func TestGetUserByIDAnswersTheAuthenticatedUsersReadModel(t *testing.T) {
-	response := sendGetUserByID(t, sendGetUserByIDParams{getUserByID: getCurrentUserReadModel})
+func TestGetUserByIDAnswersExactlyTheAuthenticatedUsersReadModel(t *testing.T) {
+	stores := newUserStores(t)
+	userID := stores.seedUser(t, seedUserParams{email: testEmail, verified: true})
+	stores.profileNames[userID] = [2]string{"Ada", "Lovelace"}
+	storedWithGoogle := stores.users.Users[userID]
+	storedWithGoogle.GoogleSubject = testGoogleSubject
+	stores.users.Users[userID] = storedWithGoogle
+
+	response := sendGetUserByID(t, stores, userID)
 
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
 	}
-
 	body := decodeBody(t, response)
-	if body["id"] != currentUserIDForTest.String() {
-		t.Errorf("id = %v, want %s", body["id"], currentUserIDForTest)
+	want := map[string]any{
+		"id":              userID.String(),
+		"email":           testEmail,
+		"createdAt":       "2026-03-14T09:26:53Z",
+		"emailVerifiedAt": "2026-03-14T09:26:53Z",
+		"signinAt":        "2026-03-14T09:26:53Z",
+		"firstName":       "Ada",
+		"lastName":        "Lovelace",
 	}
-	if body["email"] != "accountant@example.com" {
-		t.Errorf("email = %v, want accountant@example.com", body["email"])
+	assertSignInMethods(t, body, readmodels.SignInMethodEmailPassword, readmodels.SignInMethodGoogle)
+	delete(body, "signInMethods")
+	if len(body) != len(want) {
+		t.Errorf("body = %v, want exactly the keys of %v", body, want)
 	}
-	if body["createdAt"] != currentUserCreatedAtForTest.Format(time.RFC3339) {
-		t.Errorf("createdAt = %v, want %s", body["createdAt"], currentUserCreatedAtForTest.Format(time.RFC3339))
+	for key, wantValue := range want {
+		if body[key] != wantValue {
+			t.Errorf("%s = %v, want %v", key, body[key], wantValue)
+		}
 	}
-	for _, nullField := range []string{"emailVerifiedAt", "signinAt", "firstName", "lastName"} {
-		value, present := body[nullField]
-		if !present || value != nil {
-			t.Errorf("%s = %v (present %t), want an explicit null", nullField, value, present)
+}
+
+func TestGetUserByIDSendsNullForValuesTheUserDoesNotHaveYet(t *testing.T) {
+	stores := newUserStores(t)
+	userID := stores.seedUser(t, seedUserParams{email: testEmail})
+
+	body := decodeBody(t, sendGetUserByID(t, stores, userID))
+
+	for _, key := range []string{"emailVerifiedAt", "firstName", "lastName"} {
+		if value, present := body[key]; !present || value != nil {
+			t.Errorf("body[%q] = %v (present %v), want null", key, value, present)
 		}
 	}
 }
 
 func TestGetUserByIDRejectsAnAccountItCannotRead(t *testing.T) {
-	cases := []struct {
-		name       string
-		failure    error
-		wantStatus int
-		wantCode   handlers.ErrorCode
-	}{
-		{
-			name:       "account gone",
-			failure:    usererrors.ErrUserNotFound{ID: currentUserIDForTest},
-			wantStatus: http.StatusNotFound,
-			wantCode:   handlers.ErrorCodeUserNotFound,
-		},
-		{
-			name:       "lookup fails",
-			failure:    usererrors.ErrFindUserFailed{ID: currentUserIDForTest, Cause: errCollaboratorFailedForTest},
-			wantStatus: http.StatusInternalServerError,
-			wantCode:   handlers.ErrorCodeInternal,
-		},
-	}
+	t.Run("account gone", func(t *testing.T) {
+		silenceHandlerLogger(t)
 
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			silenceHandlerLogger(t)
+		response := sendGetUserByID(t, newUserStores(t), uuid.New())
 
-			response := sendGetUserByID(t, sendGetUserByIDParams{
-				getUserByID: func(context.Context, queries.GetUserByIDParams) (queries.GetUserByIDResult, error) {
-					return queries.GetUserByIDResult{}, testCase.failure
-				},
-			})
+		assertErrorCode(t, response, http.StatusNotFound, handlers.ErrorCodeUserNotFound)
+	})
 
-			if response.StatusCode != testCase.wantStatus {
-				t.Fatalf("status = %d, want %d", response.StatusCode, testCase.wantStatus)
-			}
-			if code := decodeBody(t, response)["code"]; code != string(testCase.wantCode) {
-				t.Errorf("code = %v, want %q", code, testCase.wantCode)
-			}
-		})
-	}
-}
+	t.Run("lookup fails", func(t *testing.T) {
+		silenceHandlerLogger(t)
+		stores := newUserStores(t)
+		userID := stores.seedUser(t, seedUserParams{email: testEmail})
+		stores.users.LookupFailure = usererrors.ErrFindUserFailed{Cause: errDatabaseDown}
 
-func TestGetUserByIDAnswersInternalErrorWhenTheRouteIsUnprotected(t *testing.T) {
-	silenceHandlerLogger(t)
+		response := sendGetUserByID(t, stores, userID)
 
-	response := sendGetUserByID(t, sendGetUserByIDParams{getUserByID: getCurrentUserReadModel, skipGuard: true})
-
-	if response.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusInternalServerError)
-	}
+		assertErrorCode(t, response, http.StatusInternalServerError, handlers.ErrorCodeInternal)
+	})
 }

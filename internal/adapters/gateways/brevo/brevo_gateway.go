@@ -10,7 +10,7 @@ import (
 
 	brevosdk "github.com/getbrevo/brevo-go/lib"
 
-	email "github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
 )
 
 const apiKeyHeader = "api-key"
@@ -23,18 +23,20 @@ const bodySnippetTruncatedMarker = "…[truncated]"
 
 var _ email.Gateway = EmailGateway{}
 
-// EmailGateway sends verification email through one Brevo account's transactional API.
+// EmailGateway sends transactional email through one Brevo account's transactional API.
 type EmailGateway struct {
-	client                 *brevosdk.APIClient
-	senderEmail            string
-	verificationTemplateID int64
+	client                  *brevosdk.APIClient
+	senderEmail             string
+	verificationTemplateID  int64
+	passwordResetTemplateID int64
 }
 
 // EmailGatewayParams carries the Brevo account details one gateway sends on behalf of.
 type EmailGatewayParams struct {
-	ApiKey                 string
-	SenderEmail            string
-	VerificationTemplateID int
+	ApiKey                  string
+	SenderEmail             string
+	VerificationTemplateID  int
+	PasswordResetTemplateID int
 }
 
 // NewEmailGateway validates the account details and builds the one client the process reuses.
@@ -48,9 +50,10 @@ func NewEmailGateway(params EmailGatewayParams) (EmailGateway, error) {
 	configuration.HTTPClient = &http.Client{Timeout: httpClientTimeout}
 
 	return EmailGateway{
-		client:                 brevosdk.NewAPIClient(configuration),
-		senderEmail:            params.SenderEmail,
-		verificationTemplateID: int64(params.VerificationTemplateID),
+		client:                  brevosdk.NewAPIClient(configuration),
+		senderEmail:             params.SenderEmail,
+		verificationTemplateID:  int64(params.VerificationTemplateID),
+		passwordResetTemplateID: int64(params.PasswordResetTemplateID),
 	}, nil
 }
 
@@ -59,8 +62,34 @@ func (g EmailGateway) SendVerificationEmail(
 	ctx context.Context,
 	p email.VerificationEmailPayload,
 ) (email.Response, error) {
+	return g.sendTemplatedEmail(ctx, templatedEmail{
+		RecipientEmail: p.RecipientEmail,
+		TemplateID:     g.verificationTemplateID,
+		Params:         map[string]any{p.VerificationLinkParam: p.VerificationLink},
+	})
+}
+
+// SendPasswordResetEmail renders the account's password reset template around the link and sends it.
+func (g EmailGateway) SendPasswordResetEmail(
+	ctx context.Context,
+	p email.PasswordResetEmailPayload,
+) (email.Response, error) {
+	return g.sendTemplatedEmail(ctx, templatedEmail{
+		RecipientEmail: p.RecipientEmail,
+		TemplateID:     g.passwordResetTemplateID,
+		Params:         map[string]any{p.PasswordResetLinkParam: p.PasswordResetLink},
+	})
+}
+
+type templatedEmail struct {
+	RecipientEmail string
+	TemplateID     int64
+	Params         map[string]any
+}
+
+func (g EmailGateway) sendTemplatedEmail(ctx context.Context, message templatedEmail) (email.Response, error) {
 	if g.client == nil {
-		return email.Response{}, ErrGatewayNotWired{RecipientEmail: p.RecipientEmail}
+		return email.Response{}, ErrGatewayNotWired{RecipientEmail: message.RecipientEmail}
 	}
 
 	sendCtx, cancelSend := context.WithTimeout(ctx, sendRequestTimeout)
@@ -68,43 +97,51 @@ func (g EmailGateway) SendVerificationEmail(
 
 	created, response, err := g.client.TransactionalEmailsApi.SendTransacEmail(
 		sendCtx,
-		g.buildVerificationEmail(p),
+		g.buildTemplatedEmail(message),
 	)
 	if err != nil {
-		return email.Response{}, describeSendFailure(p.RecipientEmail, response, err)
+		return email.Response{}, describeSendFailure(describeSendFailureParams{
+			RecipientEmail: message.RecipientEmail,
+			Response:       response,
+			Cause:          err,
+		})
 	}
 
 	return email.Response{ProviderMessageID: created.MessageId}, nil
 }
 
-func (g EmailGateway) buildVerificationEmail(p email.VerificationEmailPayload) brevosdk.SendSmtpEmail {
+func (g EmailGateway) buildTemplatedEmail(message templatedEmail) brevosdk.SendSmtpEmail {
 	return brevosdk.SendSmtpEmail{
 		Sender:     &brevosdk.SendSmtpEmailSender{Email: g.senderEmail},
-		To:         []brevosdk.SendSmtpEmailTo{{Email: p.RecipientEmail}},
-		TemplateId: g.verificationTemplateID,
-		Params: map[string]any{
-			p.VerificationLinkParam: p.VerificationLink,
-		},
+		To:         []brevosdk.SendSmtpEmailTo{{Email: message.RecipientEmail}},
+		TemplateId: message.TemplateID,
+		Params:     message.Params,
 	}
 }
 
-func describeSendFailure(recipientEmail string, response *http.Response, cause error) error {
-	if response == nil {
-		return ErrSendUnanswered{RecipientEmail: recipientEmail, Cause: cause}
+type describeSendFailureParams struct {
+	RecipientEmail string
+	Response       *http.Response
+	Cause          error
+}
+
+func describeSendFailure(params describeSendFailureParams) error {
+	if params.Response == nil {
+		return ErrSendUnanswered{RecipientEmail: params.RecipientEmail, Cause: params.Cause}
 	}
 
 	bodySnippet := ""
 
 	var refusal brevosdk.GenericSwaggerError
-	if errors.As(cause, &refusal) {
+	if errors.As(params.Cause, &refusal) {
 		bodySnippet = truncateBodySnippet(refusal.Body())
 	}
 
 	return ErrSendRejected{
-		RecipientEmail: recipientEmail,
-		StatusCode:     response.StatusCode,
+		RecipientEmail: params.RecipientEmail,
+		StatusCode:     params.Response.StatusCode,
 		BodySnippet:    bodySnippet,
-		Cause:          cause,
+		Cause:          params.Cause,
 	}
 }
 
@@ -125,6 +162,9 @@ func ensureAccountConfigured(params EmailGatewayParams) error {
 	}
 	if params.VerificationTemplateID <= 0 {
 		return ErrVerificationTemplateIDInvalid{TemplateID: params.VerificationTemplateID}
+	}
+	if params.PasswordResetTemplateID <= 0 {
+		return ErrPasswordResetTemplateIDInvalid{TemplateID: params.PasswordResetTemplateID}
 	}
 
 	return nil

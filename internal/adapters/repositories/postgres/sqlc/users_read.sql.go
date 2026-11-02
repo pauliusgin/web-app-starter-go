@@ -20,6 +20,8 @@ SELECT
   u.created_at,
   u.email_verified_at,
   u.signin_at,
+  (u.password_hash IS NOT NULL)::bool AS has_password,
+  (u.google_subject IS NOT NULL)::bool AS has_google_subject,
   p.first_name,
   p.last_name
 FROM
@@ -32,13 +34,15 @@ WHERE
 `
 
 type GetUserReadModelByIDRow struct {
-	ID              uuid.UUID
-	Email           string
-	CreatedAt       time.Time
-	EmailVerifiedAt sql.NullTime
-	SigninAt        sql.NullTime
-	FirstName       sql.NullString
-	LastName        sql.NullString
+	ID               uuid.UUID
+	Email            string
+	CreatedAt        time.Time
+	EmailVerifiedAt  sql.NullTime
+	SigninAt         sql.NullTime
+	HasPassword      bool
+	HasGoogleSubject bool
+	FirstName        sql.NullString
+	LastName         sql.NullString
 }
 
 func (q *Queries) GetUserReadModelByID(ctx context.Context, id uuid.UUID) (GetUserReadModelByIDRow, error) {
@@ -50,6 +54,8 @@ func (q *Queries) GetUserReadModelByID(ctx context.Context, id uuid.UUID) (GetUs
 		&i.CreatedAt,
 		&i.EmailVerifiedAt,
 		&i.SigninAt,
+		&i.HasPassword,
+		&i.HasGoogleSubject,
 		&i.FirstName,
 		&i.LastName,
 	)

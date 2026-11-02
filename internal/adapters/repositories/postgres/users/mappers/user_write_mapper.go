@@ -3,6 +3,7 @@ package mappers
 
 import (
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
+	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlnull"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 )
 
@@ -64,9 +65,10 @@ func MarkUserEmailAsVerifiedMapper(row sqlc.MarkUserEmailAsVerifiedRow) models.U
 // UserCredentialsFromEmailMapper maps the row FindUserCredentialsByEmail returns onto the domain type.
 func UserCredentialsFromEmailMapper(row sqlc.FindUserCredentialsByEmailRow) models.UserCredentials {
 	mapped := models.UserCredentials{
-		ID:           row.ID,
-		Email:        row.Email,
-		PasswordHash: row.PasswordHash,
+		ID:            row.ID,
+		Email:         row.Email,
+		PasswordHash:  row.PasswordHash.String,
+		GoogleSubject: row.GoogleSubject.String,
 	}
 
 	return mapped
@@ -75,9 +77,10 @@ func UserCredentialsFromEmailMapper(row sqlc.FindUserCredentialsByEmailRow) mode
 // UserCredentialsFromIDMapper maps the row FindUserCredentialsByID returns onto the domain type.
 func UserCredentialsFromIDMapper(row sqlc.FindUserCredentialsByIDRow) models.UserCredentials {
 	mapped := models.UserCredentials{
-		ID:           row.ID,
-		Email:        row.Email,
-		PasswordHash: row.PasswordHash,
+		ID:            row.ID,
+		Email:         row.Email,
+		PasswordHash:  row.PasswordHash.String,
+		GoogleSubject: row.GoogleSubject.String,
 	}
 
 	return mapped
@@ -116,6 +119,43 @@ func CreateUserParamsMapper(newUser models.NewUser) sqlc.CreateUserParams {
 	return sqlc.CreateUserParams{
 		ID:           newUser.ID,
 		Email:        newUser.Email,
-		PasswordHash: newUser.PasswordHash,
+		PasswordHash: sqlnull.StringUnlessEmpty(newUser.PasswordHash),
+	}
+}
+
+// CreateGoogleUserMapper maps the row CreateGoogleUser returns onto a user verified at signup.
+func CreateGoogleUserMapper(row sqlc.CreateGoogleUserRow) models.User {
+	mapped := models.User{
+		ID:              row.ID,
+		Email:           row.Email,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+		EmailVerifiedAt: row.EmailVerifiedAt.Time,
+		SigninAt:        row.SigninAt.Time,
+	}
+
+	return mapped
+}
+
+// UserFromGoogleSubjectMapper maps the row FindUserByGoogleSubject returns onto the domain type.
+func UserFromGoogleSubjectMapper(row sqlc.FindUserByGoogleSubjectRow) models.User {
+	mapped := models.User{
+		ID:              row.ID,
+		Email:           row.Email,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+		EmailVerifiedAt: row.EmailVerifiedAt.Time,
+		SigninAt:        row.SigninAt.Time,
+	}
+
+	return mapped
+}
+
+// CreateGoogleUserParamsMapper maps a new google user onto the CreateGoogleUser insert parameters.
+func CreateGoogleUserParamsMapper(newUser models.NewGoogleUser) sqlc.CreateGoogleUserParams {
+	return sqlc.CreateGoogleUserParams{
+		ID:            newUser.ID,
+		Email:         newUser.Email,
+		GoogleSubject: sqlnull.StringUnlessEmpty(newUser.GoogleSubject),
 	}
 }

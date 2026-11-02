@@ -5,28 +5,36 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	e "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/errors"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/repositories"
+	uploaderrors "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/errors"
+	uploadrepositories "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 type updateProfileFixture struct {
 	repository *repositories.InMemoryProfileRepository
-	captured   *capturedEvents
+	uploads    *uploadrepositories.InMemoryUploadRepository
+	captured   *eventstest.CapturedEvents
 }
 
 func newUpdateProfileFixture(profiles ...models.Profile) updateProfileFixture {
 	return updateProfileFixture{
 		repository: repositories.NewInMemoryProfileRepository(profiles...),
-		captured:   &capturedEvents{},
+		uploads:    pendingPictureUploads(),
+		captured:   &eventstest.CapturedEvents{},
 	}
 }
 
 func (f updateProfileFixture) update(params UpdateProfileParams) (UpdateProfileResult, error) {
 	return UpdateProfile(context.Background(), UpdateProfileDependencies{
 		ProfileWriteRepository: f.repository,
-		EventDispatcher:        f.captured.dispatcher(),
+		EventDispatcher:        f.captured.Dispatcher(),
+		AttachUpload:           f.uploads.AttachUpload,
 	}, params)
 }
 
@@ -60,11 +68,11 @@ func TestUpdateProfileAnnouncesTheUpdatedProfile(t *testing.T) {
 		t.Fatalf("UpdateProfile: %v", err)
 	}
 
-	if len(fixture.captured.recorded) != 1 || len(fixture.captured.published) != 1 {
+	if len(fixture.captured.Recorded) != 1 || len(fixture.captured.Published) != 1 {
 		t.Fatalf("recorded/published events = %d/%d, want 1/1",
-			len(fixture.captured.recorded), len(fixture.captured.published))
+			len(fixture.captured.Recorded), len(fixture.captured.Published))
 	}
-	if label := fixture.captured.recorded[0].Label; label != events.ProfileUpdatedLabel {
+	if label := fixture.captured.Recorded[0].Label; label != events.ProfileUpdatedLabel {
 		t.Errorf("Label = %q, want %q", label, events.ProfileUpdatedLabel)
 	}
 }
@@ -80,8 +88,8 @@ func TestUpdateProfileRejectsAUserWithoutAProfile(t *testing.T) {
 	if len(fixture.repository.Profiles) != 0 {
 		t.Errorf("stored profiles = %d, want none created by an update", len(fixture.repository.Profiles))
 	}
-	if len(fixture.captured.recorded) != 0 {
-		t.Errorf("recorded events = %d, want none for a rejected update", len(fixture.captured.recorded))
+	if len(fixture.captured.Recorded) != 0 {
+		t.Errorf("recorded events = %d, want none for a rejected update", len(fixture.captured.Recorded))
 	}
 }
 
@@ -98,7 +106,55 @@ func TestUpdateProfileReportsAnUpdateFailureWithoutAnnouncingIt(t *testing.T) {
 	if stored := fixture.repository.Profiles[testUserID]; stored != existing {
 		t.Errorf("stored = %+v, want the existing %+v untouched", stored, existing)
 	}
-	if len(fixture.captured.recorded) != 0 {
-		t.Errorf("recorded events = %d, want none for a failed update", len(fixture.captured.recorded))
+	if len(fixture.captured.Recorded) != 0 {
+		t.Errorf("recorded events = %d, want none for a failed update", len(fixture.captured.Recorded))
+	}
+}
+
+func TestUpdateProfileAttachesTheOwnersPictureUpload(t *testing.T) {
+	fixture := newUpdateProfileFixture(storedProfile())
+	params := augustaParams()
+	params.PictureUploadID = pendingPictureID
+
+	result, err := fixture.update(params)
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+
+	if result.Profile.PictureUploadID != pendingPictureID {
+		t.Errorf("PictureUploadID = %s, want %s", result.Profile.PictureUploadID, pendingPictureID)
+	}
+	if !isAttached(fixture.uploads, pendingPictureID) {
+		t.Error("the picture upload is still pending, want it attached so the cleanup keeps it")
+	}
+}
+
+func TestUpdateProfileRefusesAPictureThatIsNotTheOwnersProfilePicture(t *testing.T) {
+	cases := []struct {
+		name     string
+		uploadID uuid.UUID
+	}{
+		{name: "unknown upload", uploadID: uuid.MustParse("0b6f3a52-1c4d-4e8f-9a2b-7c5d3e1f0a94")},
+		{name: "upload of another purpose", uploadID: attachmentID},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newUpdateProfileFixture(storedProfile())
+			params := augustaParams()
+			params.PictureUploadID = testCase.uploadID
+
+			_, err := fixture.update(params)
+
+			if !errors.As(err, &uploaderrors.ErrUploadNotFound{}) {
+				t.Errorf("err = %v, want ErrUploadNotFound", err)
+			}
+			if fixture.repository.Profiles[testUserID].PictureUploadID != uuid.Nil {
+				t.Error("the refused picture was stored on the profile")
+			}
+			if len(fixture.captured.Published) != 0 {
+				t.Errorf("published = %d, want no event for a refused picture", len(fixture.captured.Published))
+			}
+		})
 	}
 }

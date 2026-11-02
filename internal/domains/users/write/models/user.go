@@ -29,11 +29,44 @@ type NewUser struct {
 	PasswordHash string
 }
 
-// UserCredentials is the stored identity and password hash a sign-in or password change checks.
+// NewGoogleUser is a google-authenticated user on its way in, carrying no password.
+type NewGoogleUser struct {
+	ID            uuid.UUID
+	Email         string
+	GoogleSubject string
+}
+
+// NewGoogleUserParams is the google-verified email and google subject NewGoogle stores.
+type NewGoogleUserParams struct {
+	Email         string
+	GoogleSubject string
+}
+
+// NewGoogle builds the google user row to insert, generating the id.
+func NewGoogle(params NewGoogleUserParams) NewGoogleUser {
+	return NewGoogleUser{
+		ID:            uuid.New(),
+		Email:         params.Email,
+		GoogleSubject: params.GoogleSubject,
+	}
+}
+
+// UserCredentials is the stored identity, password hash and google subject a sign-in or password change checks.
 type UserCredentials struct {
-	ID           uuid.UUID
-	Email        string
-	PasswordHash string
+	ID            uuid.UUID
+	Email         string
+	PasswordHash  string
+	GoogleSubject string
+}
+
+// HasPassword reports whether the account can sign in with a password; google-only accounts cannot.
+func (c UserCredentials) HasPassword() bool {
+	return c.PasswordHash != ""
+}
+
+// HasGoogleAccount reports whether the account can sign in with google.
+func (c UserCredentials) HasGoogleAccount() bool {
+	return c.GoogleSubject != ""
 }
 
 // NewUserParams is the email and already-hashed password New stores.
@@ -82,4 +115,16 @@ type ChangeEmailParams struct {
 type ChangePasswordParams struct {
 	ID           uuid.UUID
 	PasswordHash string
+}
+
+// AddPasswordParams is the google-only user gaining a password and the already-hashed password it gets.
+type AddPasswordParams struct {
+	ID           uuid.UUID
+	PasswordHash string
+}
+
+// AddGoogleAccountParams is the password user gaining a google account and the google subject it gets.
+type AddGoogleAccountParams struct {
+	ID            uuid.UUID
+	GoogleSubject string
 }

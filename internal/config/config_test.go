@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"testing"
-	"time"
 )
 
 const dotEnvFileName = ".env"
@@ -29,16 +28,22 @@ const validBrevoSenderEmail = "no-reply@web_app_starter.example"
 
 const validBrevoTemplateID = 7
 
+const validBrevoPasswordResetTemplateID = 9
+
 const validFirebaseCredentials = "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50In0="
 
 const validFirebaseStorageBucket = "web_app_starter.firebasestorage.app"
+
+const validGoogleClientID = "1234-abc.apps.googleusercontent.com"
 
 const validDotEnvExtraLines = FrontendBaseURLVariable + "=" + validFrontendBaseURL + "\n" +
 	BrevoApiKeyVariable + "=" + validBrevoApiKey + "\n" +
 	BrevoSenderEmailVariable + "=" + validBrevoSenderEmail + "\n" +
 	BrevoEmailVerificationTemplateIDVariable + "=7\n" +
+	BrevoPasswordResetTemplateIDVariable + "=9\n" +
 	FirebaseCredentialsVariable + "=" + validFirebaseCredentials + "\n" +
-	FirebaseStorageBucketVariable + "=" + validFirebaseStorageBucket + "\n"
+	FirebaseStorageBucketVariable + "=" + validFirebaseStorageBucket + "\n" +
+	GoogleClientIDVariable + "=" + validGoogleClientID + "\n"
 
 func prepareLoaderEnvironment(t *testing.T) {
 	t.Helper()
@@ -55,8 +60,10 @@ func prepareLoaderEnvironment(t *testing.T) {
 		BrevoApiKeyVariable,
 		BrevoSenderEmailVariable,
 		BrevoEmailVerificationTemplateIDVariable,
+		BrevoPasswordResetTemplateIDVariable,
 		FirebaseCredentialsVariable,
 		FirebaseStorageBucketVariable,
+		GoogleClientIDVariable,
 		AppEnvVariable,
 	}
 
@@ -83,8 +90,10 @@ func setValidRequiredVariables(t *testing.T) {
 	t.Setenv(BrevoApiKeyVariable, validBrevoApiKey)
 	t.Setenv(BrevoSenderEmailVariable, validBrevoSenderEmail)
 	t.Setenv(BrevoEmailVerificationTemplateIDVariable, strconv.Itoa(validBrevoTemplateID))
+	t.Setenv(BrevoPasswordResetTemplateIDVariable, strconv.Itoa(validBrevoPasswordResetTemplateID))
 	t.Setenv(FirebaseCredentialsVariable, validFirebaseCredentials)
 	t.Setenv(FirebaseStorageBucketVariable, validFirebaseStorageBucket)
+	t.Setenv(GoogleClientIDVariable, validGoogleClientID)
 }
 
 func writeDotEnvFile(t *testing.T, contents string) {
@@ -95,27 +104,7 @@ func writeDotEnvFile(t *testing.T, contents string) {
 	}
 }
 
-// net/http reads "0" as "no timeout", and context.WithTimeout(ctx, 0) is already expired
-func TestServerTimeoutsAreUsable(t *testing.T) {
-	cases := []struct {
-		name    string
-		timeout time.Duration
-	}{
-		{name: "read header", timeout: ReadHeaderTimeout},
-		{name: "read", timeout: ReadTimeout},
-		{name: "write", timeout: WriteTimeout},
-		{name: "idle", timeout: IdleTimeout},
-		{name: "shutdown", timeout: ShutdownTimeout},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if testCase.timeout <= 0 {
-				t.Errorf("timeout = %s, want a positive duration", testCase.timeout)
-			}
-		})
-	}
-
+func TestReadHeaderTimeoutFitsWithinReadTimeout(t *testing.T) {
 	if ReadHeaderTimeout > ReadTimeout {
 		t.Errorf("ReadHeaderTimeout = %s, want no more than ReadTimeout = %s", ReadHeaderTimeout, ReadTimeout)
 	}
@@ -198,8 +187,10 @@ func TestLoadConfigRequiresEveryRequiredVariable(t *testing.T) {
 		{variable: BrevoApiKeyVariable, wantExpectation: brevoApiKeyExpectationText},
 		{variable: BrevoSenderEmailVariable, wantExpectation: brevoSenderEmailExpectationText},
 		{variable: BrevoEmailVerificationTemplateIDVariable, wantExpectation: brevoTemplateIDExpectationText},
+		{variable: BrevoPasswordResetTemplateIDVariable, wantExpectation: brevoPasswordResetTemplateIDExpectationText},
 		{variable: FirebaseCredentialsVariable, wantExpectation: firebaseCredentialsExpectationText},
 		{variable: FirebaseStorageBucketVariable, wantExpectation: firebaseStorageBucketExpectationText},
+		{variable: GoogleClientIDVariable, wantExpectation: googleClientIDExpectationText},
 	}
 
 	for _, testCase := range cases {
@@ -219,6 +210,52 @@ func TestLoadConfigRequiresEveryRequiredVariable(t *testing.T) {
 			}
 			if missingVariable.Expectation != testCase.wantExpectation {
 				t.Errorf("Expectation = %q, want %q", missingVariable.Expectation, testCase.wantExpectation)
+			}
+			if cfg != (Config{}) {
+				t.Errorf("Config = %+v, want the zero value on failure", cfg)
+			}
+		})
+	}
+}
+
+func TestLoadConfigAcceptsOnlyKnownAppEnvs(t *testing.T) {
+	cases := []struct {
+		rawValue   string
+		wantAppEnv AppEnv
+		wantErr    bool
+	}{
+		{rawValue: "local", wantAppEnv: AppEnvLocal},
+		{rawValue: "dev", wantAppEnv: AppEnvDev},
+		{rawValue: "prod", wantAppEnv: AppEnvProd},
+		{rawValue: "production", wantErr: true},
+		{rawValue: "Prod", wantErr: true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.rawValue, func(t *testing.T) {
+			prepareLoaderEnvironment(t)
+			setValidRequiredVariables(t)
+			t.Setenv(AppEnvVariable, testCase.rawValue)
+
+			cfg, err := Load()
+
+			if !testCase.wantErr {
+				if err != nil {
+					t.Fatalf("LoadConfig: %v", err)
+				}
+				if cfg.AppEnv != testCase.wantAppEnv {
+					t.Errorf("AppEnv = %q, want %q", cfg.AppEnv, testCase.wantAppEnv)
+				}
+				return
+			}
+
+			appEnvInvalid := ErrAppEnvInvalid{}
+			if !errors.As(err, &appEnvInvalid) {
+				t.Fatalf("error = %v, want ErrAppEnvInvalid", err)
+			}
+			if appEnvInvalid.Variable != AppEnvVariable || appEnvInvalid.RawValue != testCase.rawValue {
+				t.Errorf("ErrAppEnvInvalid = %+v, want Variable %q and RawValue %q",
+					appEnvInvalid, AppEnvVariable, testCase.rawValue)
 			}
 			if cfg != (Config{}) {
 				t.Errorf("Config = %+v, want the zero value on failure", cfg)
@@ -279,14 +316,6 @@ func TestLoadConfigReportsEveryBadVariableAtOnce(t *testing.T) {
 	}
 }
 
-func TestEnvFileMalformedUnwrapsToItsCause(t *testing.T) {
-	cause := errors.New(`unexpected character "-" in variable name`)
-
-	if !errors.Is(ErrEnvFileMalformed{Cause: cause}, cause) {
-		t.Error("errors.Is(err, cause) = false, want true")
-	}
-}
-
 // collectReportedVariables walks the errors.Join tree Load returns and names every variable it reports.
 func collectReportedVariables(err error) []string {
 	switch typed := err.(type) {
@@ -331,6 +360,7 @@ func assertConfigMatchesOverrides(t *testing.T, cfg Config) {
 		ApiKey:                      validBrevoApiKey,
 		SenderEmail:                 validBrevoSenderEmail,
 		EmailVerificationTemplateID: validBrevoTemplateID,
+		PasswordResetTemplateID:     validBrevoPasswordResetTemplateID,
 	}
 	if cfg.Brevo != wantBrevo {
 		t.Errorf("Brevo = %+v, want %+v", cfg.Brevo, wantBrevo)

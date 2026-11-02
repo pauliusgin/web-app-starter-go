@@ -13,7 +13,9 @@ import (
 type Purpose string
 
 const (
-	PurposeProfilePicture     Purpose = "profile_picture"
+	// PurposeProfilePicture is the picture a user's profile shows; only its square preview is kept.
+	PurposeProfilePicture Purpose = "profile_picture"
+	// PurposeDocumentAttachment is an image or PDF attached to a document, kept at full resolution.
 	PurposeDocumentAttachment Purpose = "document_attachment"
 )
 
@@ -21,7 +23,9 @@ const (
 type Kind string
 
 const (
-	KindImage    Kind = "image"
+	// KindImage is a raster image that gets inspected and previewed.
+	KindImage Kind = "image"
+	// KindDocument is a non-image file stored as received.
 	KindDocument Kind = "document"
 )
 
@@ -53,7 +57,7 @@ type FileFormat struct {
 var fileFormatsByMimeType = map[string]FileFormat{
 	"image/jpeg":      {MimeType: "image/jpeg", Kind: KindImage, Extension: "jpg", MaxSizeBytes: maxFileSize},
 	"image/png":       {MimeType: "image/png", Kind: KindImage, Extension: "png", MaxSizeBytes: maxFileSize},
-	"image/webp":      {MimeType: "image/webp", Kind: KindImage, Extension: "webp", MaxSizeBytes: maxFileSize},
+	"image/webp":      {MimeType: PreviewMimeType, Kind: KindImage, Extension: "webp", MaxSizeBytes: maxFileSize},
 	"application/pdf": {MimeType: "application/pdf", Kind: KindDocument, Extension: "pdf", MaxSizeBytes: maxFileSize},
 }
 
@@ -72,12 +76,14 @@ type PreviewSpec struct {
 	Crop       bool
 }
 
-// PurposeRules is what an upload purpose accepts, how many files per request, and how its image
-// previews are made.
+// PurposeRules is what an upload purpose accepts and how its image previews are made.
 type PurposeRules struct {
 	AllowedKinds []Kind
 	MaxFiles     int
 	Preview      PreviewSpec
+	// PreviewOnly drops an image's original once its preview is made, for purposes that only
+	// ever show the preview. False keeps the original, so a new purpose never loses files by default.
+	PreviewOnly bool
 }
 
 var purposeRulesByPurpose = map[Purpose]PurposeRules{
@@ -85,6 +91,7 @@ var purposeRulesByPurpose = map[Purpose]PurposeRules{
 		AllowedKinds: []Kind{KindImage},
 		MaxFiles:     1,
 		Preview:      PreviewSpec{EdgePixels: 512, Crop: true},
+		PreviewOnly:  true,
 	},
 	PurposeDocumentAttachment: {
 		AllowedKinds: []Kind{KindImage, KindDocument},
@@ -103,6 +110,12 @@ func RulesForPurpose(purpose Purpose) (PurposeRules, bool) {
 // AllowsKind reports whether the purpose accepts files of the kind.
 func (r PurposeRules) AllowsKind(kind Kind) bool {
 	return slices.Contains(r.AllowedKinds, kind)
+}
+
+// KeepsOriginal reports whether a file of the kind keeps its original; a document always does,
+// since it has no preview to stand in for it.
+func (r PurposeRules) KeepsOriginal(kind Kind) bool {
+	return kind != KindImage || !r.PreviewOnly
 }
 
 // StoragePathsParams names the upload whose file storage paths are built.

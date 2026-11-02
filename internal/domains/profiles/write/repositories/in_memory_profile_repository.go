@@ -47,18 +47,19 @@ func (r *InMemoryProfileRepository) SaveProfile(_ context.Context, newProfile mo
 
 	savedAt := time.Now()
 	saved := models.Profile{
-		ID:        newProfile.ID,
-		FirstName: newProfile.FirstName,
-		LastName:  newProfile.LastName,
-		CreatedAt: savedAt,
-		UpdatedAt: savedAt,
+		ID:              newProfile.ID,
+		FirstName:       newProfile.FirstName,
+		LastName:        newProfile.LastName,
+		PictureUploadID: newProfile.PictureUploadID,
+		CreatedAt:       savedAt,
+		UpdatedAt:       savedAt,
 	}
 	r.Profiles[saved.ID] = saved
 
 	return saved, nil
 }
 
-// UpdateProfile replaces the profile's names, or returns UpdateFailure when one is staged.
+// UpdateProfile replaces the profile's names and picture, or returns UpdateFailure when one is staged.
 func (r *InMemoryProfileRepository) UpdateProfile(
 	_ context.Context,
 	change models.UpdateProfileParams,
@@ -73,6 +74,7 @@ func (r *InMemoryProfileRepository) UpdateProfile(
 
 	profile.FirstName = change.FirstName
 	profile.LastName = change.LastName
+	profile.PictureUploadID = change.PictureUploadID
 	profile.UpdatedAt = time.Now()
 	r.Profiles[profile.ID] = profile
 
@@ -80,6 +82,7 @@ func (r *InMemoryProfileRepository) UpdateProfile(
 }
 
 // GetProfileReadModelByID returns the client-facing view of the user's profile, or e.ErrProfileNotFound.
+// It holds no uploads, so a picture carries its upload id but no URLs, unlike the uploads join in SQL.
 func (r *InMemoryProfileRepository) GetProfileReadModelByID(
 	_ context.Context,
 	userID uuid.UUID,
@@ -92,5 +95,11 @@ func (r *InMemoryProfileRepository) GetProfileReadModelByID(
 		return readmodels.ProfileReadModel{}, e.ErrProfileNotFound{UserID: userID}
 	}
 
-	return readmodels.ProfileReadModel{ID: profile.ID, FirstName: profile.FirstName, LastName: profile.LastName}, nil
+	readModel := readmodels.ProfileReadModel{ID: profile.ID, FirstName: profile.FirstName, LastName: profile.LastName}
+	if profile.PictureUploadID != uuid.Nil {
+		pictureUploadID := profile.PictureUploadID
+		readModel.Picture.UploadID = &pictureUploadID
+	}
+
+	return readModel, nil
 }

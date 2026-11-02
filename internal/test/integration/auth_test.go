@@ -119,8 +119,8 @@ func (w *integrationWorld) backdateRefreshToken(t *testing.T, params backdateRef
 
 func TestVerificationLinkIsSpentButAClickAfterVerifyingStillSucceeds(t *testing.T) {
 	world := newIntegrationWorld(t)
-	signedUp := world.signUp(t, "member@example.com")
-	token := world.latestChallengeToken(t, "member@example.com")
+	signedUp := world.signUp(t, "accountant@example.com")
+	token := world.latestChallengeToken(t, "accountant@example.com")
 	verifyParams := userusecases.VerifyEmailParams{VerificationToken: token, UserID: signedUp.User.ID}
 
 	if err := world.verifyEmail(verifyParams); err != nil {

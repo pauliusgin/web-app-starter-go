@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -20,10 +21,36 @@ func newBufferedLogger() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(slog.NewTextHandler(logOutput, nil)), logOutput
 }
 
-func TestBuildSchedulerRegistersBackgroundJobs(t *testing.T) {
+func TestBackgroundJobsRunEveryCleanupDailyAtMidnight(t *testing.T) {
 	logger, _ := newBufferedLogger()
 
-	// The cleanup job only touches the database when it fires at midnight, never during the build.
+	// Building the jobs only wires closures; the database is touched when a job fires, never here.
+	jobs := backgroundJobs(buildSchedulerParams{Logger: logger})
+
+	wantTimeouts := map[string]time.Duration{
+		refreshTokenCleanupJobName:   refreshTokenCleanupTimeout,
+		pendingUploadCleanupJobName:  pendingUploadCleanupTimeout,
+		orphanedUploadCleanupJobName: orphanedUploadCleanupTimeout,
+	}
+	if len(jobs) != len(wantTimeouts) {
+		t.Fatalf("jobs = %d, want %d", len(jobs), len(wantTimeouts))
+	}
+	for _, job := range jobs {
+		wantTimeout, known := wantTimeouts[job.Name]
+		if !known {
+			t.Errorf("job %q, want only %v", job.Name, wantTimeouts)
+			continue
+		}
+		if job.Schedule != scheduler.DailyAtMidnight || job.Timeout != wantTimeout || job.Run == nil {
+			t.Errorf("job %q = schedule %q, timeout %s, run set %t; want daily at midnight, %s, set",
+				job.Name, job.Schedule, job.Timeout, job.Run != nil, wantTimeout)
+		}
+	}
+}
+
+func TestBuildSchedulerAcceptsTheBackgroundJobs(t *testing.T) {
+	logger, _ := newBufferedLogger()
+
 	jobScheduler, err := buildScheduler(buildSchedulerParams{Logger: logger})
 	if err != nil {
 		t.Fatalf("buildScheduler = %v, want nil", err)
@@ -50,8 +77,8 @@ func TestNewSchedulerWithJobsReportsARejectedJob(t *testing.T) {
 		},
 	})
 
-	if err == nil {
-		t.Fatal("newSchedulerWithJobs = nil error, want the job rejected")
+	if _, rejected := errors.AsType[scheduler.ErrJobTimeoutInvalid](err); !rejected {
+		t.Fatalf("newSchedulerWithJobs = %v, want ErrJobTimeoutInvalid", err)
 	}
 }
 

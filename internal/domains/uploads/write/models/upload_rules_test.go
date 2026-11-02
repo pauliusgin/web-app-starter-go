@@ -17,7 +17,7 @@ func TestDetectFileFormatSniffsAcceptedFormatsFromContent(t *testing.T) {
 	}{
 		{name: "jpeg", content: []byte("\xFF\xD8\xFF\xE0rest"), wantAccepted: true, wantMimeType: "image/jpeg", wantKind: KindImage, wantExt: "jpg"},
 		{name: "png", content: []byte("\x89PNG\r\n\x1a\nrest"), wantAccepted: true, wantMimeType: "image/png", wantKind: KindImage, wantExt: "png"},
-		{name: "webp", content: []byte("RIFF\x00\x00\x00\x00WEBPVP8 "), wantAccepted: true, wantMimeType: "image/webp", wantKind: KindImage, wantExt: "webp"},
+		{name: "webp", content: []byte("RIFF\x00\x00\x00\x00WEBPVP8 "), wantAccepted: true, wantMimeType: PreviewMimeType, wantKind: KindImage, wantExt: "webp"},
 		{name: "pdf", content: []byte("%PDF-1.7\n"), wantAccepted: true, wantMimeType: "application/pdf", wantKind: KindDocument, wantExt: "pdf"},
 		{name: "plain text", content: []byte("just some notes"), wantAccepted: false, wantMimeType: "text/plain; charset=utf-8"},
 		{name: "gif", content: []byte("GIF89a rest"), wantAccepted: false, wantMimeType: "image/gif"},
@@ -70,6 +70,15 @@ func TestRulesForPurposeAcceptsOnlyTheKindsEachPurposeAllows(t *testing.T) {
 	}
 }
 
+func TestEveryPurposeStaysWithinTheRequestFileCap(t *testing.T) {
+	for purpose, rules := range purposeRulesByPurpose {
+		if rules.MaxFiles > MaxFilesPerUpload {
+			t.Errorf("%q allows %d files, over the %d the upload request size bound is sized for",
+				purpose, rules.MaxFiles, MaxFilesPerUpload)
+		}
+	}
+}
+
 func TestRulesForPurposeRejectsAnUnknownPurpose(t *testing.T) {
 	if _, known := RulesForPurpose("cover_photo"); known {
 		t.Error("RulesForPurpose(\"cover_photo\") reported a known purpose")
@@ -95,7 +104,31 @@ func TestBuildStoragePathsPlacesFilesUnderEnvironmentOwnerPurposeAndID(t *testin
 	}
 }
 
-func TestStoredPathsListsThePreviewOnlyWhenOneExists(t *testing.T) {
+func TestKeepsOriginalDropsOnlyImageOriginalsOfPreviewOnlyPurposes(t *testing.T) {
+	cases := []struct {
+		name              string
+		purpose           Purpose
+		kind              Kind
+		wantKeepsOriginal bool
+	}{
+		{name: "profile picture image", purpose: PurposeProfilePicture, kind: KindImage, wantKeepsOriginal: false},
+		{name: "document attachment image", purpose: PurposeDocumentAttachment, kind: KindImage, wantKeepsOriginal: true},
+		{name: "document attachment document", purpose: PurposeDocumentAttachment, kind: KindDocument, wantKeepsOriginal: true},
+		{name: "document under a preview-only purpose", purpose: PurposeProfilePicture, kind: KindDocument, wantKeepsOriginal: true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			rules, _ := RulesForPurpose(testCase.purpose)
+
+			if keeps := rules.KeepsOriginal(testCase.kind); keeps != testCase.wantKeepsOriginal {
+				t.Errorf("KeepsOriginal(%q) = %v, want %v", testCase.kind, keeps, testCase.wantKeepsOriginal)
+			}
+		})
+	}
+}
+
+func TestStoredPathsListsOnlyTheFilesAnUploadHas(t *testing.T) {
 	document := Upload{OriginalPath: "a/original.pdf"}
 	if paths := document.StoredPaths(); len(paths) != 1 || paths[0] != "a/original.pdf" {
 		t.Errorf("document StoredPaths = %v, want only the original", paths)
@@ -104,5 +137,10 @@ func TestStoredPathsListsThePreviewOnlyWhenOneExists(t *testing.T) {
 	image := Upload{OriginalPath: "b/original.png", PreviewPath: "b/preview.webp"}
 	if paths := image.StoredPaths(); len(paths) != 2 || paths[0] != "b/original.png" || paths[1] != "b/preview.webp" {
 		t.Errorf("image StoredPaths = %v, want original then preview", paths)
+	}
+
+	previewOnly := Upload{PreviewPath: "c/preview.webp"}
+	if paths := previewOnly.StoredPaths(); len(paths) != 1 || paths[0] != "c/preview.webp" {
+		t.Errorf("preview-only StoredPaths = %v, want only the preview", paths)
 	}
 }

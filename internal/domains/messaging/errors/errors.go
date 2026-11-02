@@ -4,14 +4,15 @@ package errors
 import "fmt"
 
 const recipientEmailMissingText = "expected the address the verification email is sent to"
-const verificationTokenMissingText = "expected the plaintext token the verification link carries"
+const verificationTokenMissingText = "expected the plaintext token the link carries"
 const frontendBaseURLMissingText = "expected the base URL the frontend is served from"
 const frontendBaseURLUnparseableText = "failed parsing the base URL the frontend is served from"
 const frontendBaseURLIncompleteText = "expected an absolute URL carrying both a scheme and a host"
 const sendVerificationEmailFailedText = "failed sending the verification email"
+const sendPasswordResetEmailFailedText = "failed sending the password reset email"
 const recipientIDMissingText = "expected the id of the user the message is sent to"
 const saveMessageFailedText = "failed saving the message to the messaging log"
-const verificationMessageTypeUnsupportedText = "expected a message type that carries a verification link"
+const verificationMessageTypeUnsupportedText = "expected a message type that carries a token link"
 const storedMessageErrorsUnreadableText = "failed decoding the stored message errors"
 
 // ErrRecipientEmailMissing reports a verification email asked for without an address to send it to.
@@ -21,7 +22,7 @@ func (e ErrRecipientEmailMissing) Error() string {
 	return fmt.Sprintf("missing recipient email: %s", recipientEmailMissingText)
 }
 
-// ErrVerificationTokenMissing reports a verification email asked for without a challenge token.
+// ErrVerificationTokenMissing reports a token link email asked for without a challenge token.
 type ErrVerificationTokenMissing struct{}
 
 func (e ErrVerificationTokenMissing) Error() string {
@@ -74,6 +75,20 @@ func (e ErrSendVerificationEmailFailed) Unwrap() error {
 	return e.Cause
 }
 
+// ErrSendPasswordResetEmailFailed reports a password reset message the email gateway refused to send.
+type ErrSendPasswordResetEmailFailed struct {
+	RecipientEmail string
+	Cause          error
+}
+
+func (e ErrSendPasswordResetEmailFailed) Error() string {
+	return fmt.Sprintf("%s to %q: %s", sendPasswordResetEmailFailedText, e.RecipientEmail, e.Cause)
+}
+
+func (e ErrSendPasswordResetEmailFailed) Unwrap() error {
+	return e.Cause
+}
+
 // ErrRecipientIDMissing reports a message asked for without the user it is sent to.
 type ErrRecipientIDMissing struct{}
 
@@ -109,7 +124,7 @@ func (e ErrStoredMessageErrorsUnreadable) Unwrap() error {
 	return e.Cause
 }
 
-// ErrVerificationMessageTypeUnsupported reports a verification email asked for with no link path.
+// ErrVerificationMessageTypeUnsupported reports a token link asked for a message type with no frontend path.
 type ErrVerificationMessageTypeUnsupported struct {
 	Type string
 }

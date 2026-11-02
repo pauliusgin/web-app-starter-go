@@ -11,6 +11,9 @@ import (
 // AuthChallengeEmailQueue is this service's own durable queue for email auth challenges.
 const AuthChallengeEmailQueue = "web_app_starter.auth_challenge.email"
 
+// PasswordResetEmailQueue is this service's own durable queue for password reset challenges.
+const PasswordResetEmailQueue = "web_app_starter.auth_challenge.password_reset"
+
 const consumerSkippedText = "event consumer skipped: its handler could not be built"
 
 // Registry is every event this service consumes.
@@ -18,8 +21,9 @@ type Registry []Consumer
 
 // RegistryDependencies carries the collaborators the registry hands to its handlers.
 type RegistryDependencies struct {
-	VerificationEmail messaging.VerificationEmailDependencies
-	Logger            *slog.Logger
+	VerificationEmail  messaging.VerificationEmailDependencies
+	PasswordResetEmail messaging.PasswordResetEmailDependencies
+	Logger             *slog.Logger
 }
 
 // BuildRegistry returns every event this service consumes and what each one runs.
@@ -31,6 +35,11 @@ func BuildRegistry(d RegistryDependencies) Registry {
 				Label:  events.AuthChallengeGeneratedLabel,
 				Queue:  AuthChallengeEmailQueue,
 				Handle: messaging.VerificationEmailOnChallenge(d.VerificationEmail),
+			}),
+			NewConsumer(NewConsumerParams[auth.AuthChallengeGeneratedData]{
+				Label:  events.AuthChallengeGeneratedLabel,
+				Queue:  PasswordResetEmailQueue,
+				Handle: messaging.PasswordResetEmailOnChallenge(d.PasswordResetEmail),
 			}),
 		},
 	})

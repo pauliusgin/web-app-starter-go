@@ -53,6 +53,5 @@ func writeDeleteUserFailure(w http.ResponseWriter, err error) {
 		Err:                   err,
 		RuleSets:              [][]handlers.RejectionRule{deleteUserRules},
 		UnexpectedFailureText: unexpectedDeletionFailureText,
-		RejectedLogText:       deletionRejectedText,
 	})
 }

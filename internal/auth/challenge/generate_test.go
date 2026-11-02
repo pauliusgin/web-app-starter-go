@@ -12,6 +12,7 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/token"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 func emailVerificationParams(userID uuid.UUID) GenerateParams {
@@ -25,13 +26,13 @@ func emailVerificationParams(userID uuid.UUID) GenerateParams {
 
 func TestGenerateStoresTheHashOfTheTokenTheEventCarries(t *testing.T) {
 	store := NewInMemoryChallengeRepository()
-	captured := &capturedEvents{}
+	captured := &eventstest.CapturedEvents{}
 	userID := uuid.New()
 
 	generated, err := Generate(context.Background(),
 		GenerateDependencies{
 			WriteRepository: store,
-			EventDispatcher: events.Dispatcher{Recorder: captured.recorder(), Publisher: captured.publisher()},
+			EventDispatcher: events.Dispatcher{Recorder: captured.Recorder(), Publisher: captured.Publisher()},
 		},
 		emailVerificationParams(userID))
 	if err != nil {
@@ -44,7 +45,7 @@ func TestGenerateStoresTheHashOfTheTokenTheEventCarries(t *testing.T) {
 	}
 	storedChallenge := storedChallenges[0]
 
-	plaintext := tokenFromEventData(t, captured.onlyPublished(t))
+	plaintext := tokenFromEventData(t, captured.OnlyPublished(t))
 	if plaintext == "" {
 		t.Fatal("the published event carries no token, want the plaintext for the link")
 	}
@@ -61,46 +62,59 @@ func TestGenerateStoresTheHashOfTheTokenTheEventCarries(t *testing.T) {
 	}
 }
 
-func TestGenerateExpiresOneLifetimeAfterCreation(t *testing.T) {
-	store := NewInMemoryChallengeRepository()
-	captured := &capturedEvents{}
-	userID := uuid.New()
-
-	issuedNoEarlierThan := time.Now()
-	generated, err := Generate(context.Background(),
-		GenerateDependencies{
-			WriteRepository: store,
-			EventDispatcher: events.Dispatcher{Recorder: captured.recorder(), Publisher: captured.publisher()},
-		},
-		emailVerificationParams(userID))
-	issuedNoLaterThan := time.Now()
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
+func TestGenerateExpiresOneLifetimeOfItsPurposeAfterCreation(t *testing.T) {
+	cases := []struct {
+		purpose      Purpose
+		wantLifetime time.Duration
+	}{
+		{purpose: PurposeEmailVerification, wantLifetime: 5 * time.Minute},
+		{purpose: PurposePasswordReset, wantLifetime: 15 * time.Minute},
 	}
 
-	earliestExpiry := issuedNoEarlierThan.Add(Lifetime)
-	latestExpiry := issuedNoLaterThan.Add(Lifetime)
-	if generated.ExpiresAt.Before(earliestExpiry) || generated.ExpiresAt.After(latestExpiry) {
-		t.Errorf("ExpiresAt = %s, want within [%s, %s]", generated.ExpiresAt, earliestExpiry, latestExpiry)
+	for _, testCase := range cases {
+		t.Run(string(testCase.purpose), func(t *testing.T) {
+			store := NewInMemoryChallengeRepository()
+			captured := &eventstest.CapturedEvents{}
+			params := emailVerificationParams(uuid.New())
+			params.Purpose = testCase.purpose
+
+			issuedNoEarlierThan := time.Now()
+			generated, err := Generate(context.Background(),
+				GenerateDependencies{
+					WriteRepository: store,
+					EventDispatcher: events.Dispatcher{Recorder: captured.Recorder(), Publisher: captured.Publisher()},
+				},
+				params)
+			issuedNoLaterThan := time.Now()
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			earliestExpiry := issuedNoEarlierThan.Add(testCase.wantLifetime)
+			latestExpiry := issuedNoLaterThan.Add(testCase.wantLifetime)
+			if generated.ExpiresAt.Before(earliestExpiry) || generated.ExpiresAt.After(latestExpiry) {
+				t.Errorf("ExpiresAt = %s, want within [%s, %s]", generated.ExpiresAt, earliestExpiry, latestExpiry)
+			}
+		})
 	}
 }
 
 func TestGenerateKeepsTheTokenOutOfTheRecordedPayload(t *testing.T) {
 	store := NewInMemoryChallengeRepository()
-	captured := &capturedEvents{}
+	captured := &eventstest.CapturedEvents{}
 	userID := uuid.New()
 
 	_, err := Generate(context.Background(),
 		GenerateDependencies{
 			WriteRepository: store,
-			EventDispatcher: events.Dispatcher{Recorder: captured.recorder(), Publisher: captured.publisher()},
+			EventDispatcher: events.Dispatcher{Recorder: captured.Recorder(), Publisher: captured.Publisher()},
 		},
 		emailVerificationParams(userID))
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	recorded := captured.onlyRecorded(t)
+	recorded := captured.OnlyRecorded(t)
 	plaintext := tokenFromEventData(t, recorded)
 	if plaintext == "" {
 		t.Fatal("the recorded event's Data carries no token, want it for the broker payload")
@@ -156,14 +170,14 @@ func TestGenerateRejectsAnIncompleteRequestBeforeMintingAnything(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			store := NewInMemoryChallengeRepository()
-			captured := &capturedEvents{}
+			captured := &eventstest.CapturedEvents{}
 			params := emailVerificationParams(userID)
 			testCase.mutate(&params)
 
 			generated, err := Generate(context.Background(),
 				GenerateDependencies{
 					WriteRepository: store,
-					EventDispatcher: events.Dispatcher{Recorder: captured.recorder(), Publisher: captured.publisher()},
+					EventDispatcher: events.Dispatcher{Recorder: captured.Recorder(), Publisher: captured.Publisher()},
 				},
 				params)
 
@@ -177,9 +191,9 @@ func TestGenerateRejectsAnIncompleteRequestBeforeMintingAnything(t *testing.T) {
 				t.Errorf("stored rows = %d, want nothing stored for a bad request",
 					len(store.Challenges))
 			}
-			if len(captured.recorded) != 0 || len(captured.published) != 0 {
+			if len(captured.Recorded) != 0 || len(captured.Published) != 0 {
 				t.Errorf("recorded %d and published %d events, want none for a bad request",
-					len(captured.recorded), len(captured.published))
+					len(captured.Recorded), len(captured.Published))
 			}
 		})
 	}
@@ -190,16 +204,16 @@ func TestGeneratePassesAStorageFailureThroughAndAnnouncesNothing(t *testing.T) {
 	saveFailure := ErrSaveChallengeFailed{Cause: cause}
 	store := NewInMemoryChallengeRepository()
 	store.SaveFailure = saveFailure
-	captured := &capturedEvents{}
+	captured := &eventstest.CapturedEvents{}
 
 	generated, err := Generate(context.Background(),
 		GenerateDependencies{
 			WriteRepository: store,
-			EventDispatcher: events.Dispatcher{Recorder: captured.recorder(), Publisher: captured.publisher()},
+			EventDispatcher: events.Dispatcher{Recorder: captured.Recorder(), Publisher: captured.Publisher()},
 		},
 		emailVerificationParams(uuid.New()))
 
-	if err != saveFailure {
+	if !errors.Is(err, saveFailure) {
 		t.Fatalf("error = %#v, want the repository's own error passed through unchanged", err)
 	}
 
@@ -213,8 +227,8 @@ func TestGeneratePassesAStorageFailureThroughAndAnnouncesNothing(t *testing.T) {
 	if len(store.Challenges) != 0 {
 		t.Errorf("stored rows = %d, want nothing stored when the insert fails", len(store.Challenges))
 	}
-	if len(captured.recorded) != 0 || len(captured.published) != 0 {
+	if len(captured.Recorded) != 0 || len(captured.Published) != 0 {
 		t.Errorf("recorded %d and published %d events, want none when the insert fails",
-			len(captured.recorded), len(captured.published))
+			len(captured.Recorded), len(captured.Published))
 	}
 }

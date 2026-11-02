@@ -13,6 +13,58 @@ import (
 	"github.com/google/uuid"
 )
 
+const addUserGoogleAccount = `-- name: AddUserGoogleAccount :one
+UPDATE users
+SET
+  google_subject = $2,
+  email_verified_at = COALESCE(email_verified_at, NOW()),
+  updated_at = NOW()
+WHERE
+  users.id = $1
+  AND users.deleted_at IS NULL
+  AND users.google_subject IS NULL
+RETURNING
+  id
+`
+
+type AddUserGoogleAccountParams struct {
+	ID            uuid.UUID
+	GoogleSubject sql.NullString
+}
+
+func (q *Queries) AddUserGoogleAccount(ctx context.Context, arg AddUserGoogleAccountParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, addUserGoogleAccount, arg.ID, arg.GoogleSubject)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const addUserPassword = `-- name: AddUserPassword :one
+UPDATE users
+SET
+  password_hash = $2,
+  updated_at = NOW()
+WHERE
+  users.id = $1
+  AND users.deleted_at IS NULL
+  AND users.password_hash IS NULL
+  AND users.google_subject IS NOT NULL
+RETURNING
+  id
+`
+
+type AddUserPasswordParams struct {
+	ID           uuid.UUID
+	PasswordHash sql.NullString
+}
+
+func (q *Queries) AddUserPassword(ctx context.Context, arg AddUserPasswordParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, addUserPassword, arg.ID, arg.PasswordHash)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const changeUserEmail = `-- name: ChangeUserEmail :one
 UPDATE users
 SET
@@ -73,7 +125,7 @@ RETURNING
 
 type ChangeUserPasswordParams struct {
 	ID           uuid.UUID
-	PasswordHash string
+	PasswordHash sql.NullString
 }
 
 func (q *Queries) ChangeUserPassword(ctx context.Context, arg ChangeUserPasswordParams) (uuid.UUID, error) {
@@ -81,6 +133,57 @@ func (q *Queries) ChangeUserPassword(ctx context.Context, arg ChangeUserPassword
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const createGoogleUser = `-- name: CreateGoogleUser :one
+INSERT INTO
+  users (
+    id,
+    email,
+    google_subject,
+    created_at,
+    updated_at,
+    email_verified_at,
+    signin_at
+  )
+VALUES
+  ($1, $2, $3, NOW(), NOW(), NOW(), NOW())
+RETURNING
+  id,
+  email,
+  created_at,
+  updated_at,
+  email_verified_at,
+  signin_at
+`
+
+type CreateGoogleUserParams struct {
+	ID            uuid.UUID
+	Email         string
+	GoogleSubject sql.NullString
+}
+
+type CreateGoogleUserRow struct {
+	ID              uuid.UUID
+	Email           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	EmailVerifiedAt sql.NullTime
+	SigninAt        sql.NullTime
+}
+
+func (q *Queries) CreateGoogleUser(ctx context.Context, arg CreateGoogleUserParams) (CreateGoogleUserRow, error) {
+	row := q.db.QueryRowContext(ctx, createGoogleUser, arg.ID, arg.Email, arg.GoogleSubject)
+	var i CreateGoogleUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
+		&i.SigninAt,
+	)
+	return i, err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -106,7 +209,7 @@ RETURNING
 type CreateUserParams struct {
 	ID           uuid.UUID
 	Email        string
-	PasswordHash string
+	PasswordHash sql.NullString
 }
 
 type CreateUserRow struct {
@@ -168,6 +271,44 @@ func (q *Queries) FindUserByEmail(ctx context.Context, email string) (FindUserBy
 	return i, err
 }
 
+const findUserByGoogleSubject = `-- name: FindUserByGoogleSubject :one
+SELECT
+  u.id,
+  u.email,
+  u.created_at,
+  u.updated_at,
+  u.email_verified_at,
+  u.signin_at
+FROM
+  users u
+WHERE
+  u.google_subject = $1
+  AND u.deleted_at IS NULL
+`
+
+type FindUserByGoogleSubjectRow struct {
+	ID              uuid.UUID
+	Email           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	EmailVerifiedAt sql.NullTime
+	SigninAt        sql.NullTime
+}
+
+func (q *Queries) FindUserByGoogleSubject(ctx context.Context, googleSubject sql.NullString) (FindUserByGoogleSubjectRow, error) {
+	row := q.db.QueryRowContext(ctx, findUserByGoogleSubject, googleSubject)
+	var i FindUserByGoogleSubjectRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
+		&i.SigninAt,
+	)
+	return i, err
+}
+
 const findUserByID = `-- name: FindUserByID :one
 SELECT
   u.id,
@@ -210,7 +351,8 @@ const findUserCredentialsByEmail = `-- name: FindUserCredentialsByEmail :one
 SELECT
   u.id,
   u.email,
-  u.password_hash
+  u.password_hash,
+  u.google_subject
 FROM
   users u
 WHERE
@@ -219,15 +361,21 @@ WHERE
 `
 
 type FindUserCredentialsByEmailRow struct {
-	ID           uuid.UUID
-	Email        string
-	PasswordHash string
+	ID            uuid.UUID
+	Email         string
+	PasswordHash  sql.NullString
+	GoogleSubject sql.NullString
 }
 
 func (q *Queries) FindUserCredentialsByEmail(ctx context.Context, email string) (FindUserCredentialsByEmailRow, error) {
 	row := q.db.QueryRowContext(ctx, findUserCredentialsByEmail, email)
 	var i FindUserCredentialsByEmailRow
-	err := row.Scan(&i.ID, &i.Email, &i.PasswordHash)
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.GoogleSubject,
+	)
 	return i, err
 }
 
@@ -235,7 +383,8 @@ const findUserCredentialsByID = `-- name: FindUserCredentialsByID :one
 SELECT
   u.id,
   u.email,
-  u.password_hash
+  u.password_hash,
+  u.google_subject
 FROM
   users u
 WHERE
@@ -244,15 +393,21 @@ WHERE
 `
 
 type FindUserCredentialsByIDRow struct {
-	ID           uuid.UUID
-	Email        string
-	PasswordHash string
+	ID            uuid.UUID
+	Email         string
+	PasswordHash  sql.NullString
+	GoogleSubject sql.NullString
 }
 
 func (q *Queries) FindUserCredentialsByID(ctx context.Context, id uuid.UUID) (FindUserCredentialsByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, findUserCredentialsByID, id)
 	var i FindUserCredentialsByIDRow
-	err := row.Scan(&i.ID, &i.Email, &i.PasswordHash)
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.GoogleSubject,
+	)
 	return i, err
 }
 
@@ -341,6 +496,7 @@ WITH
     UPDATE users
     SET
       email = $2,
+      google_subject = NULL,
       deleted_at = NOW(),
       updated_at = NOW()
     WHERE
@@ -354,6 +510,8 @@ WITH
     SET
       first_name = $3,
       last_name = $4,
+      -- Drops the profile's claim on its picture, so the orphaned upload cleanup can delete the upload.
+      picture_upload_id = NULL,
       deleted_at = NOW(),
       updated_at = NOW()
     WHERE

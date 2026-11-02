@@ -5,7 +5,9 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/gateways/brevo"
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/gateways/firebase"
+	"github.com/pauliusgin/web_app_starter-be/internal/adapters/gateways/google"
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/imaging/libvips"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/googleidtoken"
 	"github.com/pauliusgin/web_app_starter-be/internal/config"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/imaging"
@@ -14,9 +16,10 @@ import (
 
 func buildEmailGateway(brevoConfig config.BrevoConfig) (email.Gateway, error) {
 	emailGateway, err := brevo.NewEmailGateway(brevo.EmailGatewayParams{
-		ApiKey:                 brevoConfig.ApiKey,
-		SenderEmail:            brevoConfig.SenderEmail,
-		VerificationTemplateID: brevoConfig.EmailVerificationTemplateID,
+		ApiKey:                  brevoConfig.ApiKey,
+		SenderEmail:             brevoConfig.SenderEmail,
+		VerificationTemplateID:  brevoConfig.EmailVerificationTemplateID,
+		PasswordResetTemplateID: brevoConfig.PasswordResetTemplateID,
 	})
 	if err != nil {
 		return nil, ErrEmailGatewayUnavailable{
@@ -28,7 +31,20 @@ func buildEmailGateway(brevoConfig config.BrevoConfig) (email.Gateway, error) {
 	return emailGateway, nil
 }
 
-// fileStorageResource is the file storage the server runs with and how to release it on shutdown.
+func buildGoogleIDTokenVerifier(googleConfig config.GoogleConfig) (googleidtoken.Verifier, error) {
+	verifier, err := google.NewIDTokenVerifier(context.Background(), google.NewIDTokenVerifierParams{
+		ClientID: googleConfig.ClientID,
+	})
+	if err != nil {
+		return nil, ErrGoogleIDTokenVerifierUnavailable{
+			Variables: googleConfig.EnvVariables(),
+			Cause:     err,
+		}
+	}
+
+	return verifier, nil
+}
+
 type fileStorageResource struct {
 	FileStorage storage.FileStorage
 	Close       func()
@@ -52,7 +68,6 @@ func buildFileStorage(firebaseConfig config.FirebaseConfig) (fileStorageResource
 	}, nil
 }
 
-// imageProcessorResource is the image processor the server runs with and how to release it.
 type imageProcessorResource struct {
 	ImageProcessor imaging.ImageProcessor
 	Close          func()

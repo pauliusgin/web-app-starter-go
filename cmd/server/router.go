@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/brokers/rabbitmq"
 	authrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/auth/repositories"
@@ -10,6 +11,8 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
 	uploadsrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/uploads/repositories"
 	usersrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/users/repositories"
+	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
+	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/messages"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/profiles"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/tokens"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/uploads"
@@ -17,6 +20,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/routes"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/googleidtoken"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
 	profilequeries "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
@@ -36,6 +40,8 @@ type buildRouterDependenciesParams struct {
 	AppEnv         string
 	FileStorage    storage.FileStorage
 	ImageProcessor imaging.ImageProcessor
+	GoogleVerifier googleidtoken.Verifier
+	GoogleClientID string
 }
 
 func buildRouterDependencies(params buildRouterDependenciesParams) (routes.RouterDependencies, error) {
@@ -51,7 +57,6 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		Publisher: params.EventPublisher.PublishEvent,
 	})
 
-	// auth_challenges
 	generateAuthChallengeDependencies := challenge.GenerateDependencies{
 		WriteRepository: authrepo.NewAuthChallengeWriteRepository(queries),
 		EventDispatcher: eventDispatcher,
@@ -63,7 +68,14 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return challenge.Generate(ctx, generateAuthChallengeDependencies, params)
 	}
 
-	// users
+	ensureChallengeIssuanceAllowedDependencies := challenge.EnsureIssuanceAllowedDependencies{
+		ReadRepository: authrepo.NewAuthChallengeReadRepository(queries),
+		Now:            time.Now,
+	}
+	ensureChallengeIssuanceAllowed := func(ctx context.Context, params challenge.EnsureIssuanceAllowedParams) error {
+		return challenge.EnsureIssuanceAllowed(ctx, ensureChallengeIssuanceAllowedDependencies, params)
+	}
+
 	signUpUserDependencies := userusecases.SignUpUserDependencies{
 		UserWriteRepository:   usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:       eventDispatcher,
@@ -81,6 +93,35 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return userusecases.SignInUser(ctx, signInUserDependencies, params)
 	}
 
+	// Deferred to the request, so wiring a nil verifier (as router_test does) cannot panic at build time.
+	verifyGoogleIDToken := func(ctx context.Context, idToken string) (googleidtoken.Identity, error) {
+		return params.GoogleVerifier.VerifyIDToken(ctx, idToken)
+	}
+
+	signUpUserGoogleDependencies := userusecases.SignUpUserGoogleDependencies{
+		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:     eventDispatcher,
+		VerifyGoogleIDToken: verifyGoogleIDToken,
+	}
+	signUpUserGoogle := func(
+		ctx context.Context,
+		params userusecases.SignUpUserGoogleParams,
+	) (userusecases.SignUpUserGoogleResult, error) {
+		return userusecases.SignUpUserGoogle(ctx, signUpUserGoogleDependencies, params)
+	}
+
+	signInUserGoogleDependencies := userusecases.SignInUserGoogleDependencies{
+		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:     eventDispatcher,
+		VerifyGoogleIDToken: verifyGoogleIDToken,
+	}
+	signInUserGoogle := func(
+		ctx context.Context,
+		params userusecases.SignInUserGoogleParams,
+	) (userusecases.SignInUserGoogleResult, error) {
+		return userusecases.SignInUserGoogle(ctx, signInUserGoogleDependencies, params)
+	}
+
 	verifyEmailDependencies := userusecases.VerifyEmailDependencies{
 		UserWriteRepository:          usersrepo.NewUserWriteRepository(queries),
 		EventDispatcher:              eventDispatcher,
@@ -89,30 +130,6 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 	}
 	verifyEmail := func(ctx context.Context, params userusecases.VerifyEmailParams) error {
 		return userusecases.VerifyEmail(ctx, verifyEmailDependencies, params)
-	}
-
-	deleteUserDependencies := userusecases.DeleteUserDependencies{
-		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
-		EventDispatcher:     eventDispatcher,
-	}
-	deleteUser := func(ctx context.Context, params userusecases.DeleteUserParams) error {
-		return userusecases.DeleteUser(ctx, deleteUserDependencies, params)
-	}
-
-	requestEmailChangeDependencies := userusecases.RequestEmailChangeDependencies{
-		UserWriteRepository:   usersrepo.NewUserWriteRepository(queries),
-		GenerateAuthChallenge: generateAuthChallenge,
-	}
-	requestEmailChange := func(ctx context.Context, params userusecases.RequestEmailChangeParams) error {
-		return userusecases.RequestEmailChange(ctx, requestEmailChangeDependencies, params)
-	}
-
-	changePasswordDependencies := userusecases.ChangePasswordDependencies{
-		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
-		EventDispatcher:     eventDispatcher,
-	}
-	changePassword := func(ctx context.Context, params userusecases.ChangePasswordParams) error {
-		return userusecases.ChangePassword(ctx, changePasswordDependencies, params)
 	}
 
 	getUserByIDDependencies := userqueries.GetUserByIDDependencies{
@@ -125,7 +142,91 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return userqueries.GetUserByID(ctx, getUserByIDDependencies, params)
 	}
 
-	// uploads
+	getGoogleSignInConfigDependencies := userqueries.GetGoogleSignInConfigDependencies{
+		GoogleClientID: params.GoogleClientID,
+	}
+	getGoogleSignInConfig := func(ctx context.Context) (userqueries.GetGoogleSignInConfigResult, error) {
+		return userqueries.GetGoogleSignInConfig(ctx, getGoogleSignInConfigDependencies)
+	}
+
+	deleteUserDependencies := userusecases.DeleteUserDependencies{
+		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:     eventDispatcher,
+	}
+	deleteUser := func(ctx context.Context, params userusecases.DeleteUserParams) error {
+		return userusecases.DeleteUser(ctx, deleteUserDependencies, params)
+	}
+
+	requestEmailChangeDependencies := userusecases.RequestEmailChangeDependencies{
+		UserWriteRepository:            usersrepo.NewUserWriteRepository(queries),
+		EnsureChallengeIssuanceAllowed: ensureChallengeIssuanceAllowed,
+		GenerateAuthChallenge:          generateAuthChallenge,
+	}
+	requestEmailChange := func(ctx context.Context, params userusecases.RequestEmailChangeParams) error {
+		return userusecases.RequestEmailChange(ctx, requestEmailChangeDependencies, params)
+	}
+
+	resendEmailVerificationDependencies := userusecases.ResendEmailVerificationDependencies{
+		UserWriteRepository:            usersrepo.NewUserWriteRepository(queries),
+		EnsureChallengeIssuanceAllowed: ensureChallengeIssuanceAllowed,
+		GenerateAuthChallenge:          generateAuthChallenge,
+	}
+	resendEmailVerification := func(ctx context.Context, params userusecases.ResendEmailVerificationParams) error {
+		return userusecases.ResendEmailVerification(ctx, resendEmailVerificationDependencies, params)
+	}
+
+	requestPasswordResetDependencies := userusecases.RequestPasswordResetDependencies{
+		UserWriteRepository:            usersrepo.NewUserWriteRepository(queries),
+		EnsureChallengeIssuanceAllowed: ensureChallengeIssuanceAllowed,
+		GenerateAuthChallenge:          generateAuthChallenge,
+	}
+	requestPasswordReset := func(ctx context.Context, params userusecases.RequestPasswordResetParams) error {
+		return userusecases.RequestPasswordReset(ctx, requestPasswordResetDependencies, params)
+	}
+
+	deleteUserRefreshTokensDependencies := refreshtoken.DeleteUserRefreshTokensDependencies{
+		WriteRepository: authrepo.NewRefreshTokenWriteRepository(queries),
+	}
+	deleteUserRefreshTokens := func(ctx context.Context, params refreshtoken.DeleteUserRefreshTokensParams) error {
+		return refreshtoken.DeleteUserRefreshTokens(ctx, deleteUserRefreshTokensDependencies, params)
+	}
+
+	resetPasswordDependencies := userusecases.ResetPasswordDependencies{
+		UserWriteRepository:          usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:              eventDispatcher,
+		FindAuthChallengeByTokenHash: authrepo.NewAuthChallengeReadRepository(queries).FindByTokenHash,
+		ConsumeAuthChallenge:         authrepo.NewAuthChallengeWriteRepository(queries).MarkUsed,
+		DeleteUserRefreshTokens:      deleteUserRefreshTokens,
+	}
+	resetPassword := func(ctx context.Context, params userusecases.ResetPasswordParams) error {
+		return userusecases.ResetPassword(ctx, resetPasswordDependencies, params)
+	}
+
+	changePasswordDependencies := userusecases.ChangePasswordDependencies{
+		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:     eventDispatcher,
+	}
+	changePassword := func(ctx context.Context, params userusecases.ChangePasswordParams) error {
+		return userusecases.ChangePassword(ctx, changePasswordDependencies, params)
+	}
+
+	addPasswordDependencies := userusecases.AddPasswordDependencies{
+		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:     eventDispatcher,
+	}
+	addPassword := func(ctx context.Context, params userusecases.AddPasswordParams) error {
+		return userusecases.AddPassword(ctx, addPasswordDependencies, params)
+	}
+
+	addGoogleAccountDependencies := userusecases.AddGoogleAccountDependencies{
+		UserWriteRepository: usersrepo.NewUserWriteRepository(queries),
+		EventDispatcher:     eventDispatcher,
+		VerifyGoogleIDToken: verifyGoogleIDToken,
+	}
+	addGoogleAccount := func(ctx context.Context, params userusecases.AddGoogleAccountParams) error {
+		return userusecases.AddGoogleAccount(ctx, addGoogleAccountDependencies, params)
+	}
+
 	uploadFilesDependencies := uploadusecases.UploadFilesDependencies{
 		UploadWriteRepository: uploadsrepo.NewUploadWriteRepository(queries),
 		FileStorage:           params.FileStorage,
@@ -150,10 +251,10 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return uploadqueries.GetUploadsByIDs(ctx, getUploadsByIDsDependencies, params)
 	}
 
-	// profiles
 	createProfileDependencies := profileusecases.CreateProfileDependencies{
 		ProfileWriteRepository: profilesrepo.NewProfileWriteRepository(queries),
 		EventDispatcher:        eventDispatcher,
+		AttachUpload:           uploadsrepo.NewUploadWriteRepository(queries).AttachUpload,
 	}
 	createProfile := func(
 		ctx context.Context,
@@ -165,6 +266,7 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 	updateProfileDependencies := profileusecases.UpdateProfileDependencies{
 		ProfileWriteRepository: profilesrepo.NewProfileWriteRepository(queries),
 		EventDispatcher:        eventDispatcher,
+		AttachUpload:           uploadsrepo.NewUploadWriteRepository(queries).AttachUpload,
 	}
 	updateProfile := func(
 		ctx context.Context,
@@ -183,7 +285,6 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		return profilequeries.GetProfileByID(ctx, getProfileByIDDependencies, params)
 	}
 
-	// refresh_tokens
 	issueRefreshTokenDependencies := refreshtoken.IssueDependencies{
 		WriteRepository: authrepo.NewRefreshTokenWriteRepository(queries),
 	}
@@ -234,6 +335,21 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 			IssueRefreshToken:    issueRefreshToken,
 			Jwt:                  accessTokenIssuer,
 		},
+		SignUpUserGoogle: users.SignUpUserGoogleDependencies{
+			SignUpUserGoogle:     signUpUserGoogle,
+			GetUserReadModelByID: usersrepo.NewUserReadRepository(queries).GetUserReadModelByID,
+			IssueRefreshToken:    issueRefreshToken,
+			Jwt:                  accessTokenIssuer,
+		},
+		SignInUserGoogle: users.SignInUserGoogleDependencies{
+			SignInUserGoogle:     signInUserGoogle,
+			GetUserReadModelByID: usersrepo.NewUserReadRepository(queries).GetUserReadModelByID,
+			IssueRefreshToken:    issueRefreshToken,
+			Jwt:                  accessTokenIssuer,
+		},
+		GetGoogleSignInConfig: users.GetGoogleSignInConfigDependencies{
+			GetGoogleSignInConfig: getGoogleSignInConfig,
+		},
 		VerifyEmail: users.VerifyEmailDependencies{
 			VerifyEmail: verifyEmail,
 		},
@@ -248,6 +364,15 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		},
 		ChangePassword: users.ChangePasswordDependencies{
 			ChangePassword: changePassword,
+		},
+		AddPassword: users.AddPasswordDependencies{
+			AddPassword: addPassword,
+		},
+		ResetPassword: users.ResetPasswordDependencies{
+			ResetPassword: resetPassword,
+		},
+		AddGoogleAccount: users.AddGoogleAccountDependencies{
+			AddGoogleAccount: addGoogleAccount,
 		},
 		RequireAuthenticatedUser: requireAuthenticatedUser,
 	}
@@ -282,10 +407,22 @@ func buildRouterDependencies(params buildRouterDependenciesParams) (routes.Route
 		RequireAuthenticatedUser: requireAuthenticatedUser,
 	}
 
+	messageRouterDeps := routes.MessageRoutesDependencies{
+		ResendEmailVerification: messages.ResendEmailVerificationDependencies{
+			ResendEmailVerification: resendEmailVerification,
+		},
+		SendPasswordResetEmail: messages.SendPasswordResetEmailDependencies{
+			RequestPasswordReset: requestPasswordReset,
+			Clock:                handlers.SystemResponseClock,
+		},
+		RequireAuthenticatedUser: requireAuthenticatedUser,
+	}
+
 	return routes.RouterDependencies{
 		Users:    userRouterDeps,
 		Auth:     authRouterDeps,
 		Uploads:  uploadRouterDeps,
 		Profiles: profileRouterDeps,
+		Messages: messageRouterDeps,
 	}, nil
 }

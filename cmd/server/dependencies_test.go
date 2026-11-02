@@ -80,3 +80,18 @@ func TestBuildFileStorageRejectsAnUnconfiguredFirebaseProject(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildGoogleIDTokenVerifierRejectsAMissingClientID(t *testing.T) {
+	verifier, err := buildGoogleIDTokenVerifier(config.GoogleConfig{})
+
+	var unavailable ErrGoogleIDTokenVerifierUnavailable
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("buildGoogleIDTokenVerifier = %v, want ErrGoogleIDTokenVerifierUnavailable", err)
+	}
+	if !slices.Equal(unavailable.Variables, config.GoogleConfig{}.EnvVariables()) {
+		t.Errorf("Variables = %v, want the Google env variables", unavailable.Variables)
+	}
+	if verifier != nil {
+		t.Error("a verifier was returned alongside the error, want none")
+	}
+}

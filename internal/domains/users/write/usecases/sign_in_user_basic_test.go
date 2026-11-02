@@ -80,7 +80,7 @@ func TestSignInRejectsAWrongPasswordAndAnUnknownEmailAlike(t *testing.T) {
 			_, err := harness.signIn(testCase.params)
 
 			if !errors.As(err, &e.ErrCredentialsInvalid{}) {
-				t.Fatalf("error = %v, want ErrCredentialsInvalid", err)
+				t.Fatalf("error = %v, want ErrInvalidCredentials", err)
 			}
 			harness.assertSignInRejected(t)
 		})
@@ -94,7 +94,7 @@ func TestSignInReportsALookupFailureRatherThanInvalidCredentials(t *testing.T) {
 	_, err := harness.signIn(SignInUserParams{Email: testEmail, Password: testPassword})
 
 	if !errors.As(err, &e.ErrFindUserFailed{}) || errors.As(err, &e.ErrCredentialsInvalid{}) {
-		t.Fatalf("error = %v, want ErrFindUserFailed and not ErrCredentialsInvalid", err)
+		t.Fatalf("error = %v, want ErrFindUserFailed and not ErrInvalidCredentials", err)
 	}
 	harness.users.LookupFailure = nil
 	harness.assertSignInRejected(t)
@@ -110,6 +110,19 @@ func TestSignInReportsAnUnreadableStoredHash(t *testing.T) {
 
 	if !errors.As(err, &e.ErrPasswordVerificationFailed{}) {
 		t.Fatalf("error = %v, want ErrPasswordVerificationFailed", err)
+	}
+	harness.assertSignInRejected(t)
+}
+
+func TestSignInRejectsAPasswordForAGoogleOnlyAccountAsInvalidCredentials(t *testing.T) {
+	harness := newSignInForTest(t)
+	harness.users.Users = map[uuid.UUID]repositories.InMemoryUser{}
+	harness.userID = seedGoogleUser(t, harness.users, testGoogleSubject)
+
+	_, err := harness.signIn(SignInUserParams{Email: testEmail, Password: testPassword})
+
+	if !errors.As(err, &e.ErrCredentialsInvalid{}) {
+		t.Fatalf("error = %v, want ErrCredentialsInvalid", err)
 	}
 	harness.assertSignInRejected(t)
 }

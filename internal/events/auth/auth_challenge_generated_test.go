@@ -1,88 +1,50 @@
 package auth
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
-const testChallengeToken = "9f1c4b7e2a0d48c6b3115ea77c0d5e93"
-
-const testChallengeTarget = "accountant@example.com"
-
-var testChallengeExpiresAt = time.Date(2026, time.September, 9, 18, 0, 0, 0, time.UTC)
-
-func decodePayload(t *testing.T, rawPayload []byte) map[string]any {
-	t.Helper()
-
-	payload := map[string]any{}
-	if err := json.Unmarshal(rawPayload, &payload); err != nil {
-		t.Fatalf("the encoded payload %s is not valid JSON: %v", rawPayload, err)
-	}
-
-	return payload
-}
-
-func TestNewAuthChallengeGeneratedCarriesTheChallenge(t *testing.T) {
-	userID := uuid.New()
-	challengeID := uuid.New()
+func TestAuthChallengeGeneratedSendsTheTokenToSubscribersButNotToTheLog(t *testing.T) {
+	userID := uuid.MustParse("1c9d4e2b-5f80-4a11-8b3c-2e7a9d6f4c15")
+	challengeID := uuid.MustParse("6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f")
+	expiresAt := time.Date(2026, time.September, 9, 18, 0, 0, 0, time.UTC)
 
 	generated, err := NewAuthChallengeGenerated(NewAuthChallengeGeneratedParams{
 		ChallengeID: challengeID,
 		UserID:      userID,
 		TargetType:  "email",
-		Target:      testChallengeTarget,
+		Target:      "accountant@example.com",
 		Purpose:     "email_verification",
-		Token:       testChallengeToken,
-		ExpiresAt:   testChallengeExpiresAt,
+		Token:       "9f1c4b7e2a0d48c6b3115ea77c0d5e93",
+		ExpiresAt:   expiresAt,
 	})
 	if err != nil {
 		t.Fatalf("NewAuthChallengeGenerated: %v", err)
 	}
 
-	if generated.Label != events.AuthChallengeGeneratedLabel {
-		t.Errorf("Label = %q, want %q", generated.Label, events.AuthChallengeGeneratedLabel)
-	}
-	if generated.UserID != (uuid.NullUUID{UUID: userID, Valid: true}) {
-		t.Errorf("UserID = %+v, want the valid challenged account %s", generated.UserID, userID)
-	}
-
-	wantRedactedPayload := map[string]any{
+	redacted := map[string]any{
 		"challengeId": challengeID.String(),
 		"userId":      userID.String(),
 		"targetType":  "email",
-		"target":      testChallengeTarget,
+		"target":      "accountant@example.com",
 		"purpose":     "email_verification",
-		"expiresAt":   testChallengeExpiresAt.Format(time.RFC3339Nano),
+		"expiresAt":   expiresAt.Format(time.RFC3339Nano),
 	}
-	wantPayload := map[string]any{"token": testChallengeToken}
-	for key, value := range wantRedactedPayload {
-		wantPayload[key] = value
+	withToken := map[string]any{"token": "9f1c4b7e2a0d48c6b3115ea77c0d5e93"}
+	for key, value := range redacted {
+		withToken[key] = value
 	}
 
-	assertPayloadEquals(t, decodePayload(t, generated.Data), wantPayload)
-
-	t.Run("redacted copy for the event log drops the token", func(t *testing.T) {
-		if strings.Contains(string(generated.RedactedData), testChallengeToken) {
-			t.Errorf("RedactedData = %s, want no trace of the plaintext token", generated.RedactedData)
-		}
-		assertPayloadEquals(t, decodePayload(t, generated.RedactedData), wantRedactedPayload)
+	eventstest.AssertEvent(t, generated, eventstest.WantEvent{
+		Label:           events.AuthChallengeGeneratedLabel,
+		UserID:          userID,
+		Payload:         withToken,
+		RedactedPayload: redacted,
 	})
-}
-
-func assertPayloadEquals(t *testing.T, payload map[string]any, want map[string]any) {
-	t.Helper()
-
-	if len(payload) != len(want) {
-		t.Errorf("payload = %v, want exactly the keys %v", payload, want)
-	}
-	for key, wantValue := range want {
-		if payload[key] != wantValue {
-			t.Errorf("%s = %v, want %v", key, payload[key], wantValue)
-		}
-	}
 }

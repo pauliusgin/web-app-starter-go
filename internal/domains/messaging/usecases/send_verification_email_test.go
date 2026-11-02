@@ -19,6 +19,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 const recipientEmail = "someone@example.com"
@@ -29,29 +30,11 @@ var recipientID = uuid.MustParse("1c9d4e2b-5f80-4a11-8b3c-2e7a9d6f4c15")
 
 var challengeID = uuid.MustParse("0b3e2c1d-7f6a-4e5b-8c9d-1a2b3c4d5e6f")
 
-type capturedEvents struct {
-	recorded  []events.NewEvent
-	published []events.NewEvent
-}
-
-func (c *capturedEvents) dispatcher() events.Dispatcher {
-	return events.Dispatcher{
-		Recorder: func(_ context.Context, event events.NewEvent) error {
-			c.recorded = append(c.recorded, event)
-			return nil
-		},
-		Publisher: func(_ context.Context, event events.NewEvent) error {
-			c.published = append(c.published, event)
-			return nil
-		},
-	}
-}
-
 // sendVerificationEmailFixture wires the use case to in-memory collaborators it can be inspected through.
 type sendVerificationEmailFixture struct {
 	gateway           *email.InMemoryGateway
 	messageRepository *repositories.InMemoryMessageWriteRepository
-	captured          *capturedEvents
+	captured          *eventstest.CapturedEvents
 	logOutput         *bytes.Buffer
 }
 
@@ -59,7 +42,7 @@ func newSendVerificationEmailFixture() sendVerificationEmailFixture {
 	return sendVerificationEmailFixture{
 		gateway:           email.NewInMemoryGateway(),
 		messageRepository: repositories.NewInMemoryMessageWriteRepository(),
-		captured:          &capturedEvents{},
+		captured:          &eventstest.CapturedEvents{},
 		logOutput:         &bytes.Buffer{},
 	}
 }
@@ -68,7 +51,7 @@ func (f sendVerificationEmailFixture) dependencies() SendVerificationEmailDepend
 	return SendVerificationEmailDependencies{
 		Gateway:           f.gateway,
 		MessageRepository: f.messageRepository,
-		EventDispatcher:   f.captured.dispatcher(),
+		EventDispatcher:   f.captured.Dispatcher(),
 		Logger:            slog.New(slog.NewTextHandler(f.logOutput, nil)),
 		FrontendBaseURL:   localFrontendBaseURL,
 	}
@@ -113,25 +96,14 @@ func onlyLoggedMessage(t *testing.T, repository *repositories.InMemoryMessageWri
 }
 
 // onlyDispatchedEvent fails the test unless exactly one event was both recorded and published.
-func onlyDispatchedEvent(t *testing.T, captured *capturedEvents) events.NewEvent {
+func onlyDispatchedEvent(t *testing.T, captured *eventstest.CapturedEvents) events.NewEvent {
 	t.Helper()
 
-	if len(captured.recorded) != 1 || len(captured.published) != 1 {
-		t.Fatalf("recorded = %d, published = %d, want 1 each", len(captured.recorded), len(captured.published))
+	if len(captured.Recorded) != 1 || len(captured.Published) != 1 {
+		t.Fatalf("recorded = %d, published = %d, want 1 each", len(captured.Recorded), len(captured.Published))
 	}
 
-	return captured.published[0]
-}
-
-func decodeEventPayload(t *testing.T, event events.NewEvent) map[string]any {
-	t.Helper()
-
-	payload := map[string]any{}
-	if err := json.Unmarshal(event.Data, &payload); err != nil {
-		t.Fatalf("event payload %s is not valid JSON: %v", event.Data, err)
-	}
-
-	return payload
+	return captured.Published[0]
 }
 
 func TestSendVerificationEmailHandsTheGatewayTheRecipientAndTheBuiltLink(t *testing.T) {
@@ -195,9 +167,9 @@ func TestSendVerificationEmailRejectsMissingParamsBeforeSendingAnything(t *testi
 				t.Errorf("logged messages = %d, want none for a message never sent",
 					len(fixture.messageRepository.Saved))
 			}
-			if len(fixture.captured.published) != 0 {
+			if len(fixture.captured.Published) != 0 {
 				t.Errorf("published events = %d, want none for a message never sent",
-					len(fixture.captured.published))
+					len(fixture.captured.Published))
 			}
 		})
 	}
@@ -304,7 +276,7 @@ func TestSendVerificationEmailAnnouncesAnAcceptedSend(t *testing.T) {
 		t.Errorf("Label = %q, want %q", event.Label, events.MessageSentLabel)
 	}
 
-	payload := decodeEventPayload(t, event)
+	payload := eventstest.DecodePayload(t, event)
 	if payload["messageId"] != logged.ID.String() {
 		t.Errorf("messageId = %v, want the logged message's id %s", payload["messageId"], logged.ID)
 	}
@@ -345,7 +317,7 @@ func TestSendVerificationEmailLogsAndAnnouncesARefusedSendAsFailed(t *testing.T)
 		t.Errorf("Label = %q, want %q", event.Label, events.MessageFailedLabel)
 	}
 
-	payload := decodeEventPayload(t, event)
+	payload := eventstest.DecodePayload(t, event)
 	if !reflect.DeepEqual(payload["errors"], []any{providerFailure.Error()}) {
 		t.Errorf("errors = %#v, want the gateway's failure", payload["errors"])
 	}

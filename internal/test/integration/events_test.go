@@ -9,8 +9,8 @@ import (
 
 func TestEventLogStoresTheRedactedPayloadWhileSubscribersGetTheSecret(t *testing.T) {
 	world := newIntegrationWorld(t)
-	signedUp := world.signUp(t, "member@example.com")
-	token := world.latestChallengeToken(t, "member@example.com")
+	signedUp := world.signUp(t, "accountant@example.com")
+	token := world.latestChallengeToken(t, "accountant@example.com")
 
 	var loggedPayload string
 	err := world.database.QueryRowContext(world.ctx,
@@ -23,7 +23,7 @@ func TestEventLogStoresTheRedactedPayloadWhileSubscribersGetTheSecret(t *testing
 	if strings.Contains(loggedPayload, token) {
 		t.Errorf("event_log payload = %s, want the plaintext token left out", loggedPayload)
 	}
-	if !strings.Contains(loggedPayload, "member@example.com") {
+	if !strings.Contains(loggedPayload, "accountant@example.com") {
 		t.Errorf("event_log payload = %s, want the non-secret fields kept", loggedPayload)
 	}
 }

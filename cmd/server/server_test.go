@@ -16,6 +16,7 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/routes"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/googleidtoken"
 	"github.com/pauliusgin/web_app_starter-be/internal/config"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/imaging"
@@ -64,7 +65,7 @@ func readEnvOrDefault(variable string, fallback string) string {
 }
 
 // requireLiveInfrastructure skips rather than fails when Postgres or RabbitMQ is down, because
-// runServer cannot get past its database and broker s without them.
+// runServer cannot get past its database and broker steps without them.
 func requireLiveInfrastructure(t *testing.T) {
 	t.Helper()
 
@@ -116,6 +117,9 @@ func testStartupSteps(serverPort int) startupSteps {
 	}
 	s.BuildEmailGateway = func(config.BrevoConfig) (email.Gateway, error) {
 		return email.NewInMemoryGateway(), nil
+	}
+	s.BuildGoogleVerifier = func(config.GoogleConfig) (googleidtoken.Verifier, error) {
+		return googleidtoken.InMemoryVerifier{}, nil
 	}
 	s.BuildFileStorage = func(config.FirebaseConfig) (fileStorageResource, error) {
 		return fileStorageResource{FileStorage: storage.NewInMemoryFileStorage(), Close: func() {}}, nil
@@ -229,6 +233,14 @@ func TestRunServerReportsFailedStartupStep(t *testing.T) {
 			},
 		},
 		{
+			name: "google verifier",
+			breakStep: func(s *startupSteps) {
+				s.BuildGoogleVerifier = func(config.GoogleConfig) (googleidtoken.Verifier, error) {
+					return nil, errStartupStepFailed
+				}
+			},
+		},
+		{
 			name: "file storage",
 			breakStep: func(s *startupSteps) {
 				s.BuildFileStorage = func(config.FirebaseConfig) (fileStorageResource, error) {
@@ -328,6 +340,19 @@ func TestRunServerRefusesToStartWithoutFirebaseConfig(t *testing.T) {
 
 	if _, ok := errors.AsType[ErrFileStorageUnavailable](err); !ok {
 		t.Fatalf("runServer = %v, want ErrFileStorageUnavailable", err)
+	}
+}
+
+func TestRunServerRefusesToStartWithoutGoogleConfig(t *testing.T) {
+	silenceDefaultLogger(t)
+
+	s := testStartupSteps(reserveFreePort(t))
+	s.BuildGoogleVerifier = buildGoogleIDTokenVerifier
+
+	err := runServer(s)
+
+	if _, ok := errors.AsType[ErrGoogleIDTokenVerifierUnavailable](err); !ok {
+		t.Fatalf("runServer = %v, want ErrGoogleIDTokenVerifierUnavailable", err)
 	}
 }
 

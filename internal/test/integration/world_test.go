@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -17,6 +18,7 @@ import (
 	uploadsrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/uploads/repositories"
 	usersrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/users/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/googleidtoken"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
 	profileusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/imaging"
@@ -44,15 +46,14 @@ type integrationWorld struct {
 	userWriteRepository   usersrepo.UserWriteRepository
 	userReadRepository    usersrepo.UserReadRepository
 	uploadRepository      uploadsrepo.UploadWriteRepository
-	uploadReadRepository  uploadsrepo.UploadReadRepository
 	challengeReadRepo     authrepo.AuthChallengeReadRepository
-	challengeWriteRepo    authrepo.AuthChallengeWriteRepository
 	refreshTokenReadRepo  authrepo.RefreshTokenReadRepository
 	refreshTokenWriteRepo authrepo.RefreshTokenWriteRepository
+	eventDispatcher       events.Dispatcher
+	ensureIssuanceAllowed func(ctx context.Context, params challenge.EnsureIssuanceAllowedParams) error
+	generateAuthChallenge func(ctx context.Context, params challenge.GenerateParams) (challenge.GenerateResult, error)
 	profileRepository     profilesrepo.ProfileWriteRepository
 	profileReadRepository profilesrepo.ProfileReadRepository
-	eventDispatcher       events.Dispatcher
-	generateAuthChallenge func(ctx context.Context, params challenge.GenerateParams) (challenge.GenerateResult, error)
 }
 
 func newIntegrationWorld(t *testing.T) *integrationWorld {
@@ -73,10 +74,13 @@ func newIntegrationWorld(t *testing.T) *integrationWorld {
 		Publisher: published.publish,
 	}
 
-	challengeWriteRepo := authrepo.NewAuthChallengeWriteRepository(queries)
 	generateDependencies := challenge.GenerateDependencies{
-		WriteRepository: challengeWriteRepo,
+		WriteRepository: authrepo.NewAuthChallengeWriteRepository(queries),
 		EventDispatcher: eventDispatcher,
+	}
+	issuanceDependencies := challenge.EnsureIssuanceAllowedDependencies{
+		ReadRepository: authrepo.NewAuthChallengeReadRepository(queries),
+		Now:            time.Now,
 	}
 
 	return &integrationWorld{
@@ -88,14 +92,15 @@ func newIntegrationWorld(t *testing.T) *integrationWorld {
 		userWriteRepository:   usersrepo.NewUserWriteRepository(queries),
 		userReadRepository:    usersrepo.NewUserReadRepository(queries),
 		uploadRepository:      uploadsrepo.NewUploadWriteRepository(queries),
-		uploadReadRepository:  uploadsrepo.NewUploadReadRepository(queries),
 		challengeReadRepo:     authrepo.NewAuthChallengeReadRepository(queries),
-		challengeWriteRepo:    challengeWriteRepo,
 		refreshTokenReadRepo:  authrepo.NewRefreshTokenReadRepository(queries),
 		refreshTokenWriteRepo: authrepo.NewRefreshTokenWriteRepository(queries),
 		profileRepository:     profilesrepo.NewProfileWriteRepository(queries),
 		profileReadRepository: profilesrepo.NewProfileReadRepository(queries),
 		eventDispatcher:       eventDispatcher,
+		ensureIssuanceAllowed: func(ctx context.Context, params challenge.EnsureIssuanceAllowedParams) error {
+			return challenge.EnsureIssuanceAllowed(ctx, issuanceDependencies, params)
+		},
 		generateAuthChallenge: func(ctx context.Context, params challenge.GenerateParams) (challenge.GenerateResult, error) {
 			return challenge.Generate(ctx, generateDependencies, params)
 		},
@@ -151,18 +156,14 @@ func (w *integrationWorld) latestChallengeToken(t *testing.T, target string) str
 	return ""
 }
 
-func (w *integrationWorld) signUpUser(params userusecases.SignUpUserParams) (userusecases.SignUpUserResult, error) {
-	return userusecases.SignUpUser(w.ctx, userusecases.SignUpUserDependencies{
-		UserWriteRepository:   w.userWriteRepository,
-		EventDispatcher:       w.eventDispatcher,
-		GenerateAuthChallenge: w.generateAuthChallenge,
-	}, params)
-}
-
 func (w *integrationWorld) signUp(t *testing.T, email string) userusecases.SignUpUserResult {
 	t.Helper()
 
-	signedUp, err := w.signUpUser(userusecases.SignUpUserParams{Email: email, Password: testPassword})
+	signedUp, err := userusecases.SignUpUser(w.ctx, userusecases.SignUpUserDependencies{
+		UserWriteRepository:   w.userWriteRepository,
+		EventDispatcher:       w.eventDispatcher,
+		GenerateAuthChallenge: w.generateAuthChallenge,
+	}, userusecases.SignUpUserParams{Email: email, Password: testPassword})
 	if err != nil {
 		t.Fatalf("SignUpUser(%q): %v", email, err)
 	}
@@ -170,12 +171,39 @@ func (w *integrationWorld) signUp(t *testing.T, email string) userusecases.SignU
 	return signedUp
 }
 
+const integrationGoogleIDToken = "integration-google-id-token"
+
+const integrationGoogleSubject = "109876543210987654321"
+
+// googleVerifier vouches for integrationGoogleIDToken as a verified google account holding email.
+func googleVerifier(email string) googleidtoken.InMemoryVerifier {
+	return googleidtoken.InMemoryVerifier{Identities: map[string]googleidtoken.Identity{
+		integrationGoogleIDToken: {Subject: integrationGoogleSubject, Email: email, EmailVerified: true},
+	}}
+}
+
+func (w *integrationWorld) signUpGoogle(email string) (userusecases.SignUpUserGoogleResult, error) {
+	return userusecases.SignUpUserGoogle(w.ctx, userusecases.SignUpUserGoogleDependencies{
+		UserWriteRepository: w.userWriteRepository,
+		EventDispatcher:     w.eventDispatcher,
+		VerifyGoogleIDToken: googleVerifier(email).VerifyIDToken,
+	}, userusecases.SignUpUserGoogleParams{IDToken: integrationGoogleIDToken})
+}
+
+func (w *integrationWorld) signInGoogle(email string) (userusecases.SignInUserGoogleResult, error) {
+	return userusecases.SignInUserGoogle(w.ctx, userusecases.SignInUserGoogleDependencies{
+		UserWriteRepository: w.userWriteRepository,
+		EventDispatcher:     w.eventDispatcher,
+		VerifyGoogleIDToken: googleVerifier(email).VerifyIDToken,
+	}, userusecases.SignInUserGoogleParams{IDToken: integrationGoogleIDToken})
+}
+
 func (w *integrationWorld) verifyEmail(params userusecases.VerifyEmailParams) error {
 	return userusecases.VerifyEmail(w.ctx, userusecases.VerifyEmailDependencies{
 		UserWriteRepository:          w.userWriteRepository,
 		EventDispatcher:              w.eventDispatcher,
 		FindAuthChallengeByTokenHash: w.challengeReadRepo.FindByTokenHash,
-		ConsumeAuthChallenge:         w.challengeWriteRepo.MarkUsed,
+		ConsumeAuthChallenge:         authrepo.NewAuthChallengeWriteRepository(w.queries).MarkUsed,
 	}, params)
 }
 
@@ -204,10 +232,26 @@ func (w *integrationWorld) signIn(params userusecases.SignInUserParams) (useruse
 	}, params)
 }
 
+func (w *integrationWorld) addPassword(params userusecases.AddPasswordParams) error {
+	return userusecases.AddPassword(w.ctx, userusecases.AddPasswordDependencies{
+		UserWriteRepository: w.userWriteRepository,
+		EventDispatcher:     w.eventDispatcher,
+	}, params)
+}
+
 func (w *integrationWorld) requestEmailChange(params userusecases.RequestEmailChangeParams) error {
 	return userusecases.RequestEmailChange(w.ctx, userusecases.RequestEmailChangeDependencies{
-		UserWriteRepository:   w.userWriteRepository,
-		GenerateAuthChallenge: w.generateAuthChallenge,
+		UserWriteRepository:            w.userWriteRepository,
+		EnsureChallengeIssuanceAllowed: w.ensureIssuanceAllowed,
+		GenerateAuthChallenge:          w.generateAuthChallenge,
+	}, params)
+}
+
+func (w *integrationWorld) resendEmailVerification(params userusecases.ResendEmailVerificationParams) error {
+	return userusecases.ResendEmailVerification(w.ctx, userusecases.ResendEmailVerificationDependencies{
+		UserWriteRepository:            w.userWriteRepository,
+		EnsureChallengeIssuanceAllowed: w.ensureIssuanceAllowed,
+		GenerateAuthChallenge:          w.generateAuthChallenge,
 	}, params)
 }
 
@@ -237,6 +281,17 @@ func (w *integrationWorld) createProfile(
 	return profileusecases.CreateProfile(w.ctx, profileusecases.CreateProfileDependencies{
 		ProfileWriteRepository: w.profileRepository,
 		EventDispatcher:        w.eventDispatcher,
+		AttachUpload:           w.uploadRepository.AttachUpload,
+	}, params)
+}
+
+func (w *integrationWorld) updateProfile(
+	params profileusecases.UpdateProfileParams,
+) (profileusecases.UpdateProfileResult, error) {
+	return profileusecases.UpdateProfile(w.ctx, profileusecases.UpdateProfileDependencies{
+		ProfileWriteRepository: w.profileRepository,
+		EventDispatcher:        w.eventDispatcher,
+		AttachUpload:           w.uploadRepository.AttachUpload,
 	}, params)
 }
 
@@ -272,12 +327,4 @@ func (w *integrationWorld) issueRefreshToken(t *testing.T, userID uuid.UUID) ref
 	}
 
 	return issued
-}
-
-func assertTextColumn(t *testing.T, column string, got *string, want string) {
-	t.Helper()
-
-	if got == nil || *got != want {
-		t.Errorf("%s = %v, want %q", column, got, want)
-	}
 }

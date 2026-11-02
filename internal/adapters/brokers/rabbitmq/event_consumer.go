@@ -169,10 +169,10 @@ func (c EventConsumer) rejectForRetry(delivery rbmq.Delivery) rbmq.Action {
 func deliveryLogAttributes(queue string, delivery rbmq.Delivery) []any {
 	return []any{
 		"queue", queue,
-		"routing_key", delivery.RoutingKey,
-		"message_id", delivery.MessageId,
-		"failed_deliveries", failedDeliveryCount(delivery),
-		"max_retries", maxDeliveryRetries,
+		"routingKey", delivery.RoutingKey,
+		"messageId", delivery.MessageId,
+		"failedDeliveries", failedDeliveryCount(delivery),
+		"maxRetries", maxDeliveryRetries,
 	}
 }
 

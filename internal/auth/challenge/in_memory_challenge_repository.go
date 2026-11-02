@@ -17,10 +17,11 @@ type InMemoryChallengeRepository struct {
 	Challenges []Challenge
 	Now        func() time.Time
 
-	// SaveFailure, MarkUsedFailure and FindFailure, when set, are returned instead of doing the work.
+	// SaveFailure, MarkUsedFailure, FindFailure and ListFailure, when set, are returned instead of doing the work.
 	SaveFailure     error
 	MarkUsedFailure error
 	FindFailure     error
+	ListFailure     error
 }
 
 // NewInMemoryChallengeRepository builds a repository holding the given challenges and no failure staged.
@@ -83,6 +84,54 @@ func (r *InMemoryChallengeRepository) FindByTokenHash(_ context.Context, tokenHa
 	}
 
 	return Challenge{}, ErrChallengeNotFound{}
+}
+
+// ListCreatedAtByTarget returns, oldest first, when challenges for the purpose were sent to the target.
+func (r *InMemoryChallengeRepository) ListCreatedAtByTarget(
+	_ context.Context,
+	params ListCreatedAtByTargetParams,
+) ([]time.Time, error) {
+	return r.listCreatedAt(listCreatedAtParams{
+		Purpose:      params.Purpose,
+		CreatedAfter: params.CreatedAfter,
+		Matches: func(stored Challenge) bool {
+			return stored.UserID == params.UserID && stored.Target == params.Target
+		},
+	})
+}
+
+// ListCreatedAtByUser returns, oldest first, when challenges for the purpose were minted for the user.
+func (r *InMemoryChallengeRepository) ListCreatedAtByUser(
+	_ context.Context,
+	params ListCreatedAtByUserParams,
+) ([]time.Time, error) {
+	return r.listCreatedAt(listCreatedAtParams{
+		Purpose:      params.Purpose,
+		CreatedAfter: params.CreatedAfter,
+		Matches:      func(stored Challenge) bool { return stored.UserID == params.UserID },
+	})
+}
+
+type listCreatedAtParams struct {
+	Purpose      Purpose
+	CreatedAfter time.Time
+	Matches      func(stored Challenge) bool
+}
+
+func (r *InMemoryChallengeRepository) listCreatedAt(params listCreatedAtParams) ([]time.Time, error) {
+	if r.ListFailure != nil {
+		return nil, r.ListFailure
+	}
+
+	var createdAt []time.Time
+	for _, stored := range r.Challenges {
+		if stored.Purpose == params.Purpose && stored.CreatedAt.After(params.CreatedAfter) && params.Matches(stored) {
+			createdAt = append(createdAt, stored.CreatedAt)
+		}
+	}
+	slices.SortFunc(createdAt, time.Time.Compare)
+
+	return createdAt, nil
 }
 
 func (r *InMemoryChallengeRepository) now() time.Time {

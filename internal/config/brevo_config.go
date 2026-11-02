@@ -9,6 +9,8 @@ const (
 	BrevoSenderEmailVariable = "BREVO_SENDER_EMAIL"
 	// BrevoEmailVerificationTemplateIDVariable names the env var holding the verification template.
 	BrevoEmailVerificationTemplateIDVariable = "BREVO_EMAIL_VERIFICATION_TEMPLATE_ID"
+	// BrevoPasswordResetTemplateIDVariable names the env var holding the password reset template.
+	BrevoPasswordResetTemplateIDVariable = "BREVO_PASSWORD_RESET_TEMPLATE_ID"
 )
 
 // BrevoConfig is the Brevo account this service sends transactional email through.
@@ -16,6 +18,7 @@ type BrevoConfig struct {
 	ApiKey                      string
 	SenderEmail                 string
 	EmailVerificationTemplateID int
+	PasswordResetTemplateID     int
 }
 
 // EnvVariables is every env variable this config is read from.
@@ -24,6 +27,7 @@ func (BrevoConfig) EnvVariables() []string {
 		BrevoApiKeyVariable,
 		BrevoSenderEmailVariable,
 		BrevoEmailVerificationTemplateIDVariable,
+		BrevoPasswordResetTemplateIDVariable,
 	}
 }
 
@@ -43,7 +47,12 @@ func loadBrevoConfig() (BrevoConfig, error) {
 		Expectation: brevoTemplateIDExpectationText,
 	})
 
-	if err := errors.Join(apiKeyErr, senderEmailErr, templateIDErr); err != nil {
+	passwordResetTemplateID, passwordResetTemplateIDErr := readRequiredIntVariable(readRequiredVariableParams{
+		Variable:    BrevoPasswordResetTemplateIDVariable,
+		Expectation: brevoPasswordResetTemplateIDExpectationText,
+	})
+
+	if err := errors.Join(apiKeyErr, senderEmailErr, templateIDErr, passwordResetTemplateIDErr); err != nil {
 		return BrevoConfig{}, err
 	}
 
@@ -51,5 +60,6 @@ func loadBrevoConfig() (BrevoConfig, error) {
 		ApiKey:                      apiKey,
 		SenderEmail:                 senderEmail,
 		EmailVerificationTemplateID: emailVerificationTemplateID,
+		PasswordResetTemplateID:     passwordResetTemplateID,
 	}, nil
 }

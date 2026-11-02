@@ -6,7 +6,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/models"
 )
 
-// UploadReadModelFromIDMapper maps the single upload lookup row onto the read model; a NULL preview becomes nil.
+// UploadReadModelFromIDMapper maps the single upload lookup row onto the read model; a NULL original or preview becomes nil.
 func UploadReadModelFromIDMapper(row sqlc.GetUploadReadModelByIDRow) models.UploadReadModel {
 	return models.UploadReadModel{
 		ID:          row.ID,
@@ -14,7 +14,7 @@ func UploadReadModelFromIDMapper(row sqlc.GetUploadReadModelByIDRow) models.Uplo
 		Purpose:     row.Purpose,
 		Kind:        row.Kind,
 		MimeType:    row.MimeType,
-		OriginalURL: row.OriginalUrl,
+		OriginalURL: sqlnull.StringPointer(row.OriginalUrl),
 		PreviewURL:  sqlnull.StringPointer(row.PreviewUrl),
 	}
 }

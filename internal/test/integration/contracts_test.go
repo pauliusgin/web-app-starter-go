@@ -5,6 +5,9 @@ import (
 
 	"github.com/google/uuid"
 
+	authrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/auth/repositories"
+	profilesrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/profiles/repositories"
+	uploadsrepo "github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/uploads/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/challenge/challengerepositorytest"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken/refreshtokenrepositorytest"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/repositories/profilerepositorytest"
@@ -12,12 +15,6 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/repositories/userrepositorytest"
 )
-
-func (w *integrationWorld) seedUser(t *testing.T) uuid.UUID {
-	t.Helper()
-
-	return w.signUp(t, "owner-"+uuid.NewString()[:8]+"@example.com").User.ID
-}
 
 func TestPostgresUserRepositoryHonoursTheContract(t *testing.T) {
 	userrepositorytest.RunUserRepositoryContract(t, userrepositorytest.RunUserRepositoryContractParams{
@@ -33,9 +30,11 @@ func TestPostgresChallengeRepositoriesHonourTheContract(t *testing.T) {
 			world := newIntegrationWorld(t)
 
 			return challengerepositorytest.ContractSubject{
-				WriteRepository: world.challengeWriteRepo,
+				WriteRepository: authrepo.NewAuthChallengeWriteRepository(world.queries),
 				ReadRepository:  world.challengeReadRepo,
-				SeedUser:        world.seedUser,
+				SeedUser: func(t *testing.T) uuid.UUID {
+					return world.signUp(t, "owner-"+uuid.NewString()[:8]+"@example.com").User.ID
+				},
 			}
 		},
 	})
@@ -50,7 +49,9 @@ func TestPostgresRefreshTokenRepositoriesHonourTheContract(t *testing.T) {
 				return refreshtokenrepositorytest.ContractSubject{
 					WriteRepository: world.refreshTokenWriteRepo,
 					ReadRepository:  world.refreshTokenReadRepo,
-					SeedUser:        world.seedUser,
+					SeedUser: func(t *testing.T) uuid.UUID {
+						return world.signUp(t, "owner-"+uuid.NewString()[:8]+"@example.com").User.ID
+					},
 				}
 			},
 		})
@@ -63,8 +64,11 @@ func TestPostgresUploadRepositoriesHonourTheContract(t *testing.T) {
 
 			return uploadrepositorytest.ContractSubject{
 				WriteRepository: world.uploadRepository,
-				ReadRepository:  world.uploadReadRepository,
-				SeedUser:        world.seedUser,
+				ReadRepository:  uploadsrepo.NewUploadReadRepository(world.queries),
+				SeedUser: func(t *testing.T) uuid.UUID {
+					return world.signUp(t, "owner-"+uuid.NewString()[:8]+"@example.com").User.ID
+				},
+				ReferenceUpload: world.referenceUploadAsProfilePicture,
 			}
 		},
 	})
@@ -77,8 +81,10 @@ func TestPostgresProfileRepositoriesHonourTheContract(t *testing.T) {
 
 			return profilerepositorytest.ContractSubject{
 				WriteRepository: world.profileRepository,
-				ReadRepository:  world.profileReadRepository,
-				SeedUser:        world.seedUser,
+				ReadRepository:  profilesrepo.NewProfileReadRepository(world.queries),
+				SeedUser: func(t *testing.T) uuid.UUID {
+					return world.signUp(t, "owner-"+uuid.NewString()[:8]+"@example.com").User.ID
+				},
 			}
 		},
 	})

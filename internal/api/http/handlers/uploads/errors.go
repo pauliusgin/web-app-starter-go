@@ -4,8 +4,6 @@ import "fmt"
 
 const unexpectedUploadFailureText = "could not upload the files"
 
-const uploadRejectedText = "rejected a file upload"
-
 const uploadFormCleanupFailedText = "failed removing the temp files of a parsed upload form"
 
 const uploadFormUndecodableText = "could not read the multipart form"

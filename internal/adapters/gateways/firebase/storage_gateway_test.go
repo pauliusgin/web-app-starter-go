@@ -19,12 +19,12 @@ import (
 func TestBuildDownloadURLEscapesThePathAsOneSegment(t *testing.T) {
 	downloadURL := BuildDownloadURL(BuildDownloadURLParams{
 		BucketName:    "web_app_starter.firebasestorage.app",
-		Path:          "uploads/test/users/42/profile_picture/7/original file.jpg",
+		Path:          "uploads/test/users/42/company_logo/7/original file.jpg",
 		DownloadToken: "token-1",
 	})
 
 	want := "https://firebasestorage.googleapis.com/v0/b/web_app_starter.firebasestorage.app/o/" +
-		"uploads%2Ftest%2Fusers%2F42%2Fprofile_picture%2F7%2Foriginal%20file.jpg?alt=media&token=token-1"
+		"uploads%2Ftest%2Fusers%2F42%2Fcompany_logo%2F7%2Foriginal%20file.jpg?alt=media&token=token-1"
 	if downloadURL != want {
 		t.Errorf("BuildDownloadURL =\n%s\nwant\n%s", downloadURL, want)
 	}

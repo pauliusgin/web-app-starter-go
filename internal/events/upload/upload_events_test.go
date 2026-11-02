@@ -1,97 +1,51 @@
 package upload
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
-var testUploadID = uuid.MustParse("6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f")
+func TestUploadEventsCarryThePayloadSubscribersRead(t *testing.T) {
+	userID := uuid.MustParse("1c9d4e2b-5f80-4a11-8b3c-2e7a9d6f4c15")
+	uploadID := uuid.MustParse("6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f")
 
-var testUserID = uuid.MustParse("1c9d4e2b-5f80-4a11-8b3c-2e7a9d6f4c15")
-
-func decodePayload(t *testing.T, event events.NewEvent) map[string]any {
-	t.Helper()
-
-	payload := map[string]any{}
-	if err := json.Unmarshal(event.Data, &payload); err != nil {
-		t.Fatalf("the encoded payload %s is not valid JSON: %v", event.Data, err)
+	cases := []struct {
+		name  string
+		build func() (events.NewEvent, error)
+		want  eventstest.WantEvent
+	}{
+		{
+			name: "created",
+			build: func() (events.NewEvent, error) {
+				return NewUploadCreated(NewUploadCreatedParams{UploadID: uploadID, UserID: userID, Purpose: "company_logo", Kind: "image"})
+			},
+			want: eventstest.WantEvent{Label: events.UploadCreatedLabel, UserID: userID, Payload: map[string]any{
+				"uploadId": uploadID.String(), "userId": userID.String(), "purpose": "company_logo", "kind": "image",
+			}},
+		},
+		{
+			name: "deleted",
+			build: func() (events.NewEvent, error) {
+				return NewUploadDeleted(NewUploadDeletedParams{UploadID: uploadID, UserID: userID, Purpose: "invoice_picture_before"})
+			},
+			want: eventstest.WantEvent{Label: events.UploadDeletedLabel, UserID: userID, Payload: map[string]any{
+				"uploadId": uploadID.String(), "userId": userID.String(), "purpose": "invoice_picture_before",
+			}},
+		},
 	}
 
-	return payload
-}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			built, err := testCase.build()
+			if err != nil {
+				t.Fatalf("building the event: %v", err)
+			}
 
-func assertLabelAndUser(t *testing.T, event events.NewEvent, wantLabel events.Label) {
-	t.Helper()
-
-	if event.Label != wantLabel {
-		t.Errorf("Label = %q, want %q", event.Label, wantLabel)
-	}
-	if event.UserID != (uuid.NullUUID{UUID: testUserID, Valid: true}) {
-		t.Errorf("UserID = %+v, want the valid account %s", event.UserID, testUserID)
-	}
-	if event.RedactedData != nil {
-		t.Errorf("RedactedData = %s, want nil for a payload without secrets", event.RedactedData)
-	}
-}
-
-func TestNewUploadCreatedCarriesTheUploadOwnerPurposeAndKind(t *testing.T) {
-	created, err := NewUploadCreated(NewUploadCreatedParams{
-		UploadID: testUploadID,
-		UserID:   testUserID,
-		Purpose:  "profile_picture",
-		Kind:     "image",
-	})
-	if err != nil {
-		t.Fatalf("NewUploadCreated: %v", err)
-	}
-
-	assertLabelAndUser(t, created, events.UploadCreatedLabel)
-
-	payload := decodePayload(t, created)
-	want := map[string]any{
-		"uploadId": testUploadID.String(),
-		"userId":   testUserID.String(),
-		"purpose":  "profile_picture",
-		"kind":     "image",
-	}
-	if len(payload) != len(want) {
-		t.Fatalf("payload = %s, want exactly %v", created.Data, want)
-	}
-	for key, wantValue := range want {
-		if payload[key] != wantValue {
-			t.Errorf("payload[%q] = %v, want %v", key, payload[key], wantValue)
-		}
-	}
-}
-
-func TestNewUploadDeletedCarriesTheUploadOwnerAndPurpose(t *testing.T) {
-	deleted, err := NewUploadDeleted(NewUploadDeletedParams{
-		UploadID: testUploadID,
-		UserID:   testUserID,
-		Purpose:  "document_attachment",
-	})
-	if err != nil {
-		t.Fatalf("NewUploadDeleted: %v", err)
-	}
-
-	assertLabelAndUser(t, deleted, events.UploadDeletedLabel)
-
-	payload := decodePayload(t, deleted)
-	want := map[string]any{
-		"uploadId": testUploadID.String(),
-		"userId":   testUserID.String(),
-		"purpose":  "document_attachment",
-	}
-	if len(payload) != len(want) {
-		t.Fatalf("payload = %s, want exactly %v", deleted.Data, want)
-	}
-	for key, wantValue := range want {
-		if payload[key] != wantValue {
-			t.Errorf("payload[%q] = %v, want %v", key, payload[key], wantValue)
-		}
+			eventstest.AssertEvent(t, built, testCase.want)
+		})
 	}
 }

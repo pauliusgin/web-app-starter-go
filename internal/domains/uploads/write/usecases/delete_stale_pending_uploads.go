@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 
-	e "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/errors"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/gateways/storage"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
-	uploadevents "github.com/pauliusgin/web_app_starter-be/internal/events/upload"
 )
 
 // DeleteStalePendingUploadsResult is how many stale uploads the run removed.
@@ -17,17 +14,15 @@ type DeleteStalePendingUploadsResult struct {
 	DeletedCount int
 }
 
-// DeleteStalePendingUploadsDependencies carries the collaborators purging stale uploads needs.
+// DeleteStalePendingUploadsDependencies carries the upload store, the file storage and the event dispatcher.
 type DeleteStalePendingUploadsDependencies struct {
 	UploadWriteRepository repositories.UploadWriteRepository
 	FileStorage           storage.FileStorage
 	EventDispatcher       events.Dispatcher
 }
 
-// DeleteStalePendingUploads removes every unattached upload older than models.PendingUploadRetention,
-// files first.
-// An upload whose files or row cannot be removed is kept for the next run; the count and the joined
-// failures report how the run went.
+// DeleteStalePendingUploads removes unattached uploads past models.PendingUploadRetention, files first.
+// An upload that fails to delete is kept for the next run.
 func DeleteStalePendingUploads(
 	ctx context.Context,
 	d DeleteStalePendingUploadsDependencies,
@@ -41,7 +36,13 @@ func DeleteStalePendingUploads(
 	var failures []error
 
 	for _, upload := range staleUploads {
-		if err := deleteStaleUpload(ctx, d, upload); err != nil {
+		err := deleteUploadWithFiles(ctx, deleteUploadWithFilesParams{
+			UploadWriteRepository: d.UploadWriteRepository,
+			FileStorage:           d.FileStorage,
+			EventDispatcher:       d.EventDispatcher,
+			Upload:                upload,
+		})
+		if err != nil {
 			failures = append(failures, err)
 			continue
 		}
@@ -50,36 +51,4 @@ func DeleteStalePendingUploads(
 	}
 
 	return DeleteStalePendingUploadsResult{DeletedCount: deletedCount}, errors.Join(failures...)
-}
-
-func deleteStaleUpload(ctx context.Context, d DeleteStalePendingUploadsDependencies, upload models.Upload) error {
-	for _, path := range upload.StoredPaths() {
-		if err := deleteStoredFileIfPresent(ctx, d.FileStorage, path); err != nil {
-			return err
-		}
-	}
-
-	if err := d.UploadWriteRepository.DeleteUploadByID(ctx, upload.ID); err != nil {
-		return err
-	}
-
-	uploadevents.DispatchUploadDeleted(ctx, d.EventDispatcher, uploadevents.NewUploadDeletedParams{
-		UploadID: upload.ID,
-		UserID:   upload.UserID,
-		Purpose:  string(upload.Purpose),
-	})
-
-	return nil
-}
-
-func deleteStoredFileIfPresent(ctx context.Context, fileStorage storage.FileStorage, path string) error {
-	err := fileStorage.DeleteFile(ctx, path)
-	if err == nil {
-		return nil
-	}
-	if _, missing := errors.AsType[e.ErrStoredFileNotFound](err); missing {
-		return nil
-	}
-
-	return e.ErrDeleteStoredFileFailed{Path: path, Cause: err}
 }

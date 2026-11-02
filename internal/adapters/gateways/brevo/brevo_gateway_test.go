@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	email "github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
 )
 
 const testApiKey = "test-api-key"
@@ -24,6 +24,8 @@ const testVerificationLink = "http://localhost:3001/verify-email?token=abc123"
 const testVerificationLinkParam = "verificationUrl"
 
 const testTemplateID = 7
+
+const testPasswordResetTemplateID = 9
 
 const apiVersionPrefix = "/v3"
 
@@ -85,9 +87,10 @@ func newTestEmailGateway(t *testing.T, baseURL string) EmailGateway {
 	t.Helper()
 
 	gateway, err := NewEmailGateway(EmailGatewayParams{
-		ApiKey:                 testApiKey,
-		SenderEmail:            testSenderEmail,
-		VerificationTemplateID: testTemplateID,
+		ApiKey:                  testApiKey,
+		SenderEmail:             testSenderEmail,
+		VerificationTemplateID:  testTemplateID,
+		PasswordResetTemplateID: testPasswordResetTemplateID,
 	})
 	if err != nil {
 		t.Fatalf("NewEmailGateway: %v", err)
@@ -149,6 +152,37 @@ func TestSendVerificationEmailPostsTheTemplateIDTheRecipientAndTheLink(t *testin
 	sender, ok := recorded.body["sender"].(map[string]any)
 	if !ok || sender["email"] != testSenderEmail {
 		t.Errorf("sender = %#v, want email %q", recorded.body["sender"], testSenderEmail)
+	}
+}
+
+func TestSendPasswordResetEmailPostsThePasswordResetTemplateAndTheLink(t *testing.T) {
+	const passwordResetLinkParam = "passwordResetLink"
+	const passwordResetLink = "https://app.example.com/reset-password?token=abc123"
+
+	api := newFakeBrevoAPI(t, http.StatusCreated, `{"messageId":"sent"}`)
+	gateway := newTestEmailGateway(t, api.baseURL)
+
+	_, err := gateway.SendPasswordResetEmail(context.Background(), email.PasswordResetEmailPayload{
+		RecipientEmail:         testRecipientEmail,
+		PasswordResetLinkParam: passwordResetLinkParam,
+		PasswordResetLink:      passwordResetLink,
+	})
+	if err != nil {
+		t.Fatalf("SendPasswordResetEmail: %v", err)
+	}
+
+	recorded := api.onlyRequest(t)
+
+	if recorded.body["templateId"] != float64(testPasswordResetTemplateID) {
+		t.Errorf("templateId = %#v, want the number %d", recorded.body["templateId"], testPasswordResetTemplateID)
+	}
+	params, ok := recorded.body["params"].(map[string]any)
+	if !ok || len(params) != 1 || params[passwordResetLinkParam] != passwordResetLink {
+		t.Errorf("params = %#v, want only %s = %q", recorded.body["params"], passwordResetLinkParam, passwordResetLink)
+	}
+	recipients, ok := recorded.body["to"].([]any)
+	if !ok || len(recipients) != 1 {
+		t.Fatalf("to = %#v, want exactly one recipient", recorded.body["to"])
 	}
 }
 
@@ -372,35 +406,48 @@ func TestNewEmailGatewayRejectsAnAccountItCouldNotSendWith(t *testing.T) {
 		{
 			name: "empty api key",
 			params: EmailGatewayParams{
-				SenderEmail:            testSenderEmail,
-				VerificationTemplateID: testTemplateID,
+				SenderEmail:             testSenderEmail,
+				VerificationTemplateID:  testTemplateID,
+				PasswordResetTemplateID: testPasswordResetTemplateID,
 			},
 			wantErrType: &ErrApiKeyMissing{},
 		},
 		{
 			name: "empty sender email",
 			params: EmailGatewayParams{
-				ApiKey:                 testApiKey,
-				VerificationTemplateID: testTemplateID,
+				ApiKey:                  testApiKey,
+				VerificationTemplateID:  testTemplateID,
+				PasswordResetTemplateID: testPasswordResetTemplateID,
 			},
 			wantErrType: &ErrSenderEmailMissing{},
 		},
 		{
 			name: "zero template id",
 			params: EmailGatewayParams{
-				ApiKey:      testApiKey,
-				SenderEmail: testSenderEmail,
+				ApiKey:                  testApiKey,
+				SenderEmail:             testSenderEmail,
+				PasswordResetTemplateID: testPasswordResetTemplateID,
 			},
 			wantErrType: &ErrVerificationTemplateIDInvalid{},
 		},
 		{
 			name: "negative template id",
 			params: EmailGatewayParams{
-				ApiKey:                 testApiKey,
-				SenderEmail:            testSenderEmail,
-				VerificationTemplateID: -1,
+				ApiKey:                  testApiKey,
+				SenderEmail:             testSenderEmail,
+				VerificationTemplateID:  -1,
+				PasswordResetTemplateID: testPasswordResetTemplateID,
 			},
 			wantErrType: &ErrVerificationTemplateIDInvalid{},
+		},
+		{
+			name: "zero password reset template id",
+			params: EmailGatewayParams{
+				ApiKey:                 testApiKey,
+				SenderEmail:            testSenderEmail,
+				VerificationTemplateID: testTemplateID,
+			},
+			wantErrType: &ErrPasswordResetTemplateIDInvalid{},
 		},
 	}
 
@@ -420,9 +467,10 @@ func TestNewEmailGatewayRejectsAnAccountItCouldNotSendWith(t *testing.T) {
 
 func TestNewEmailGatewayAcceptsACompleteAccount(t *testing.T) {
 	gateway, err := NewEmailGateway(EmailGatewayParams{
-		ApiKey:                 testApiKey,
-		SenderEmail:            testSenderEmail,
-		VerificationTemplateID: testTemplateID,
+		ApiKey:                  testApiKey,
+		SenderEmail:             testSenderEmail,
+		VerificationTemplateID:  testTemplateID,
+		PasswordResetTemplateID: testPasswordResetTemplateID,
 	})
 	if err != nil {
 		t.Fatalf("NewEmailGateway: %v", err)
@@ -434,5 +482,9 @@ func TestNewEmailGatewayAcceptsACompleteAccount(t *testing.T) {
 	if gateway.verificationTemplateID != int64(testTemplateID) {
 		t.Errorf("verificationTemplateID = %d, want %d",
 			gateway.verificationTemplateID, testTemplateID)
+	}
+	if gateway.passwordResetTemplateID != int64(testPasswordResetTemplateID) {
+		t.Errorf("passwordResetTemplateID = %d, want %d",
+			gateway.passwordResetTemplateID, testPasswordResetTemplateID)
 	}
 }

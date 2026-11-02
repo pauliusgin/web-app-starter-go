@@ -13,6 +13,48 @@ import (
 	"github.com/google/uuid"
 )
 
+const attachUpload = `-- name: AttachUpload :one
+UPDATE uploads
+SET
+  attached_at = NOW(),
+  updated_at = NOW()
+WHERE
+  uploads.id = $1
+  AND uploads.user_id = $2
+  AND uploads.purpose = $3
+RETURNING
+  id, user_id, purpose, kind, mime_type, size_bytes, width, height, original_path, original_url, preview_path, preview_url, created_at, updated_at, attached_at
+`
+
+type AttachUploadParams struct {
+	ID      uuid.UUID
+	UserID  uuid.UUID
+	Purpose string
+}
+
+func (q *Queries) AttachUpload(ctx context.Context, arg AttachUploadParams) (Upload, error) {
+	row := q.db.QueryRowContext(ctx, attachUpload, arg.ID, arg.UserID, arg.Purpose)
+	var i Upload
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Purpose,
+		&i.Kind,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.Width,
+		&i.Height,
+		&i.OriginalPath,
+		&i.OriginalUrl,
+		&i.PreviewPath,
+		&i.PreviewUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AttachedAt,
+	)
+	return i, err
+}
+
 const deleteUploadByID = `-- name: DeleteUploadByID :exec
 DELETE FROM uploads u
 WHERE
@@ -22,6 +64,133 @@ WHERE
 func (q *Queries) DeleteUploadByID(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, deleteUploadByID, id)
 	return err
+}
+
+const findUnreferencedUploadByID = `-- name: FindUnreferencedUploadByID :one
+SELECT
+  u.id,
+  u.user_id,
+  u.purpose,
+  u.kind,
+  u.mime_type,
+  u.size_bytes,
+  u.width,
+  u.height,
+  u.original_path,
+  u.original_url,
+  u.preview_path,
+  u.preview_url,
+  u.created_at,
+  u.updated_at,
+  u.attached_at
+FROM
+  uploads u
+WHERE
+  u.id = $1
+  AND NOT EXISTS (
+    SELECT
+      1
+    FROM
+      upload_references r
+    WHERE
+      r.upload_id = u.id
+  )
+`
+
+func (q *Queries) FindUnreferencedUploadByID(ctx context.Context, id uuid.UUID) (Upload, error) {
+	row := q.db.QueryRowContext(ctx, findUnreferencedUploadByID, id)
+	var i Upload
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Purpose,
+		&i.Kind,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.Width,
+		&i.Height,
+		&i.OriginalPath,
+		&i.OriginalUrl,
+		&i.PreviewPath,
+		&i.PreviewUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AttachedAt,
+	)
+	return i, err
+}
+
+const listOrphanedAttachedUploads = `-- name: ListOrphanedAttachedUploads :many
+SELECT
+  u.id,
+  u.user_id,
+  u.purpose,
+  u.kind,
+  u.mime_type,
+  u.size_bytes,
+  u.width,
+  u.height,
+  u.original_path,
+  u.original_url,
+  u.preview_path,
+  u.preview_url,
+  u.created_at,
+  u.updated_at,
+  u.attached_at
+FROM
+  uploads u
+WHERE
+  u.attached_at IS NOT NULL
+  AND u.attached_at < $1::TIMESTAMPTZ
+  AND NOT EXISTS (
+    SELECT
+      1
+    FROM
+      upload_references r
+    WHERE
+      r.upload_id = u.id
+  )
+ORDER BY
+  u.attached_at
+`
+
+func (q *Queries) ListOrphanedAttachedUploads(ctx context.Context, attachedBefore time.Time) ([]Upload, error) {
+	rows, err := q.db.QueryContext(ctx, listOrphanedAttachedUploads, attachedBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Upload
+	for rows.Next() {
+		var i Upload
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Purpose,
+			&i.Kind,
+			&i.MimeType,
+			&i.SizeBytes,
+			&i.Width,
+			&i.Height,
+			&i.OriginalPath,
+			&i.OriginalUrl,
+			&i.PreviewPath,
+			&i.PreviewUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AttachedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUnusedPendingUploads = `-- name: ListUnusedPendingUploads :many
@@ -139,8 +308,8 @@ type SaveUploadParams struct {
 	SizeBytes    int64
 	Width        sql.NullInt32
 	Height       sql.NullInt32
-	OriginalPath string
-	OriginalUrl  string
+	OriginalPath sql.NullString
+	OriginalUrl  sql.NullString
 	PreviewPath  sql.NullString
 	PreviewUrl   sql.NullString
 }

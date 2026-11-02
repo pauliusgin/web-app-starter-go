@@ -2,6 +2,7 @@ package challenge
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,6 +16,8 @@ const challengeLookupFailedText = "failed finding the challenge by its token has
 const consumeChallengeFailedText = "failed spending the challenge"
 const challengePurposeMismatchText = "the challenge was minted to prove something else"
 const challengeOwnedByAnotherUserText = "the challenge was minted for a different account"
+const issuanceRateLimitedText = "too many challenges sent recently"
+const issuanceHistoryLookupFailedText = "failed listing when earlier challenges were sent"
 
 // ErrTargetMissing reports a challenge asked for without the target it would be sent to.
 type ErrTargetMissing struct{}
@@ -101,4 +104,26 @@ type ErrChallengeOwnedByAnotherUser struct {
 func (e ErrChallengeOwnedByAnotherUser) Error() string {
 	return fmt.Sprintf("challenge %s belongs to another user: %s",
 		e.ChallengeID, challengeOwnedByAnotherUserText)
+}
+
+// ErrIssuanceRateLimited reports a challenge asked for before the issuance limits allow another one.
+type ErrIssuanceRateLimited struct {
+	RetryAfter time.Duration
+}
+
+func (e ErrIssuanceRateLimited) Error() string {
+	return fmt.Sprintf("%s, retry after %s", issuanceRateLimitedText, e.RetryAfter)
+}
+
+// ErrIssuanceHistoryLookupFailed reports a challenge history read the database could not complete.
+type ErrIssuanceHistoryLookupFailed struct {
+	Cause error
+}
+
+func (e ErrIssuanceHistoryLookupFailed) Error() string {
+	return fmt.Sprintf("%s: %s", issuanceHistoryLookupFailedText, e.Cause)
+}
+
+func (e ErrIssuanceHistoryLookupFailed) Unwrap() error {
+	return e.Cause
 }

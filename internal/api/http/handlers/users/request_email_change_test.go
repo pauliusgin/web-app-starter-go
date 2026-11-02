@@ -1,192 +1,92 @@
 package users
 
 import (
-	"context"
-	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
-	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
 
-const requestEmailChangePath = "/api/v1/users/change-email"
-
-const requestEmailChangeBodyForTest = `{"newEmail":"  Bookkeeper@Example.com "}`
-
-type recordingEmailChangeRequester struct {
-	failure       error
-	receivedCalls []usecases.RequestEmailChangeParams
-}
-
-func (r *recordingEmailChangeRequester) requestEmailChange(
-	_ context.Context,
-	params usecases.RequestEmailChangeParams,
-) error {
-	r.receivedCalls = append(r.receivedCalls, params)
-
-	return r.failure
-}
-
-type postRequestEmailChangeParams struct {
-	requester *recordingEmailChangeRequester
-	body      string
-	skipGuard bool
-}
-
-func postRequestEmailChange(t *testing.T, params postRequestEmailChangeParams) *http.Response {
+func sendRequestEmailChange(t *testing.T, stores *userStores, userID uuid.UUID, body string) *http.Response {
 	t.Helper()
 
-	handler := RequestEmailChange(RequestEmailChangeDependencies{
-		RequestEmailChange: params.requester.requestEmailChange,
+	return sendUserRequest(t, sendUserRequestParams{
+		handler:  stores.requestEmailChangeHandler(),
+		method:   http.MethodPost,
+		path:     "/api/v1/users/change-email",
+		body:     body,
+		asUserID: userID,
 	})
-
-	var served http.Handler = handler
-	if !params.skipGuard {
-		served = authenticateForTest(verifyingUserID)(handler)
-	}
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, requestEmailChangePath, strings.NewReader(params.body))
-	request.Header.Set("Authorization", "Bearer header.payload.signature")
-	request.Header.Set("Content-Type", "application/json")
-
-	served.ServeHTTP(recorder, request)
-
-	response := recorder.Result()
-	t.Cleanup(func() { response.Body.Close() })
-
-	return response
 }
 
-func TestRequestEmailChangeHandsTheNormalizedEmailToTheUseCase(t *testing.T) {
-	requester := &recordingEmailChangeRequester{}
+func TestRequestEmailChangeSendsALinkToTheNormalizedNewAddress(t *testing.T) {
+	stores := newUserStores(t)
+	userID := stores.seedUser(t, seedUserParams{email: testEmail, verified: true})
 
-	response := postRequestEmailChange(t, postRequestEmailChangeParams{
-		requester: requester,
-		body:      requestEmailChangeBodyForTest,
-	})
+	response := sendRequestEmailChange(t, stores, userID, `{"newEmail":"  Bookkeeper@Example.com "}`)
 
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusAccepted)
 	}
-	if len(requester.receivedCalls) != 1 {
-		t.Fatalf("RequestEmailChange was called %d times, want 1", len(requester.receivedCalls))
+	if sent := stores.challenges.linksSentTo("bookkeeper@example.com"); sent != 1 {
+		t.Errorf("links sent to the new address = %d, want 1", sent)
 	}
-
-	want := usecases.RequestEmailChangeParams{
-		UserID:   verifyingUserID,
-		NewEmail: "bookkeeper@example.com",
-	}
-	if requester.receivedCalls[0] != want {
-		t.Errorf("params = %+v, want %+v", requester.receivedCalls[0], want)
+	if email := stores.storedUser(t, userID).Email; email != testEmail {
+		t.Errorf("stored email = %q, want %q kept until the link is clicked", email, testEmail)
 	}
 }
 
-func TestRequestEmailChangeFailsWhenTheUserIDIsMissingFromContext(t *testing.T) {
+func TestRequestEmailChangeRejectsWithoutSendingALink(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantCode   handlers.ErrorCode
+	}{
+		{name: "malformed json", body: `{"newEmail":`, wantStatus: http.StatusBadRequest, wantCode: handlers.ErrorCodeRequestBodyInvalid},
+		{name: "invalid email", body: `{"newEmail":"bob"}`, wantStatus: http.StatusBadRequest, wantCode: handlers.ErrorCodeEmailInvalid},
+		{
+			name:       "current email",
+			body:       `{"newEmail":"accountant@example.com"}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   handlers.ErrorCodeEmailUnchanged,
+		},
+		{
+			name:       "email held by another account",
+			body:       `{"newEmail":"taken@example.com"}`,
+			wantStatus: http.StatusConflict,
+			wantCode:   handlers.ErrorCodeEmailTaken,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			stores := newUserStores(t)
+			userID := stores.seedUser(t, seedUserParams{email: testEmail, verified: true})
+			stores.seedUser(t, seedUserParams{email: "taken@example.com"})
+
+			response := sendRequestEmailChange(t, stores, userID, testCase.body)
+
+			assertErrorCode(t, response, testCase.wantStatus, testCase.wantCode)
+			if len(stores.challenges.Challenges) != 0 {
+				t.Errorf("links sent = %d, want none", len(stores.challenges.Challenges))
+			}
+		})
+	}
+}
+
+func TestRequestEmailChangeAnswersARateLimitWithTheWait(t *testing.T) {
 	silenceHandlerLogger(t)
+	stores := newUserStores(t)
+	userID := stores.seedUser(t, seedUserParams{email: testEmail, verified: true})
+	stores.rateLimited["bookkeeper@example.com"] = true
 
-	requester := &recordingEmailChangeRequester{}
+	response := sendRequestEmailChange(t, stores, userID, `{"newEmail":"bookkeeper@example.com"}`)
 
-	response := postRequestEmailChange(t, postRequestEmailChangeParams{
-		requester: requester,
-		body:      requestEmailChangeBodyForTest,
-		skipGuard: true,
-	})
-
-	if response.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusInternalServerError)
+	if retryAfter := response.Header.Get("Retry-After"); retryAfter != "20" {
+		t.Errorf("Retry-After = %q, want %q", retryAfter, "20")
 	}
-	if len(requester.receivedCalls) != 0 {
-		t.Errorf("RequestEmailChange was called %d times, want 0", len(requester.receivedCalls))
-	}
-}
-
-func TestRequestEmailChangeRejectsABadRequestBeforeTheUseCase(t *testing.T) {
-	cases := []struct {
-		name     string
-		body     string
-		wantCode handlers.ErrorCode
-	}{
-		{name: "malformed json", body: `{"newEmail":`, wantCode: handlers.ErrorCodeRequestBodyInvalid},
-		{name: "invalid email", body: `{"newEmail":"bob"}`, wantCode: handlers.ErrorCodeEmailInvalid},
-		{name: "missing email", body: `{}`, wantCode: handlers.ErrorCodeEmailInvalid},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			requester := &recordingEmailChangeRequester{}
-
-			response := postRequestEmailChange(t, postRequestEmailChangeParams{requester: requester, body: testCase.body})
-
-			if response.StatusCode != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusBadRequest)
-			}
-			body := decodeBody(t, response)
-			if code, _ := body["code"].(string); code != string(testCase.wantCode) {
-				t.Errorf(`body["code"] = %q, want %q`, code, testCase.wantCode)
-			}
-			if len(requester.receivedCalls) != 0 {
-				t.Errorf("RequestEmailChange was called %d times, want 0", len(requester.receivedCalls))
-			}
-		})
-	}
-}
-
-func TestRequestEmailChangeMapsUseCaseFailures(t *testing.T) {
-	cases := []struct {
-		name        string
-		failure     error
-		wantStatus  int
-		wantCode    handlers.ErrorCode
-		wantMessage string
-	}{
-		{
-			name:        "same email as now",
-			failure:     usererrors.ErrEmailUnchanged{Email: "bookkeeper@example.com"},
-			wantStatus:  http.StatusBadRequest,
-			wantCode:    handlers.ErrorCodeEmailUnchanged,
-			wantMessage: usererrors.ErrEmailUnchanged{Email: "bookkeeper@example.com"}.Error(),
-		},
-		{
-			name:        "email held by another account",
-			failure:     usererrors.ErrEmailTaken{Email: "bookkeeper@example.com"},
-			wantStatus:  http.StatusConflict,
-			wantCode:    handlers.ErrorCodeEmailTaken,
-			wantMessage: usererrors.ErrEmailTaken{Email: "bookkeeper@example.com"}.Error(),
-		},
-		{
-			name:        "something unexpected broke",
-			failure:     errors.New("connection reset"),
-			wantStatus:  http.StatusInternalServerError,
-			wantCode:    handlers.ErrorCodeInternal,
-			wantMessage: unexpectedEmailChangeRequestFailureText,
-		},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			silenceHandlerLogger(t)
-
-			response := postRequestEmailChange(t, postRequestEmailChangeParams{
-				requester: &recordingEmailChangeRequester{failure: testCase.failure},
-				body:      requestEmailChangeBodyForTest,
-			})
-
-			if response.StatusCode != testCase.wantStatus {
-				t.Fatalf("status = %d, want %d", response.StatusCode, testCase.wantStatus)
-			}
-
-			body := decodeBody(t, response)
-			if code, _ := body["code"].(string); code != string(testCase.wantCode) {
-				t.Errorf(`body["code"] = %q, want %q`, code, testCase.wantCode)
-			}
-			if message, _ := body["message"].(string); message != testCase.wantMessage {
-				t.Errorf(`body["message"] = %q, want %q`, message, testCase.wantMessage)
-			}
-		})
-	}
+	assertErrorCode(t, response, http.StatusTooManyRequests, handlers.ErrorCodeVerificationEmailRateLimited)
 }

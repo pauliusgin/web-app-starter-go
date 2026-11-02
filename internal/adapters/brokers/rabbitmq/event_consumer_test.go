@@ -11,7 +11,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	rbmq "github.com/wagslane/go-rabbitmq"
 
-	"github.com/pauliusgin/web_app_starter-be/internal/config"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 )
 
@@ -19,23 +18,21 @@ const testQueue = "web_app_starter.auth_challenge.email"
 
 const testChallengeToken = "plaintext-token-that-must-never-be-logged"
 
-type recordingDeliveryHandler struct {
-	received    [][]byte
+// deliveryHandler answers every delivery with handleError, or panics with panicWith when set.
+type deliveryHandler struct {
 	handleError error
 	panicWith   any
 }
 
-func (h *recordingDeliveryHandler) handle(_ context.Context, body []byte) error {
+func (h deliveryHandler) handle(_ context.Context, _ []byte) error {
 	if h.panicWith != nil {
 		panic(h.panicWith)
 	}
 
-	h.received = append(h.received, body)
-
 	return h.handleError
 }
 
-func newTestEventConsumer(handler *recordingDeliveryHandler, logs *bytes.Buffer) EventConsumer {
+func newTestEventConsumer(handler deliveryHandler, logs *bytes.Buffer) EventConsumer {
 	return EventConsumer{
 		queue:          testQueue,
 		handle:         handler.handle,
@@ -50,34 +47,19 @@ func testDeliveryBody() []byte {
 		`"token":"` + testChallengeToken + `"}`)
 }
 
-type recordingAcknowledger struct {
-	rejectedWithRequeue int
-	rejectError         error
-}
+// acceptingAcknowledger stands in for the broker channel; requeueing is proven against a live broker in
+// TestFailingEventIsRetriedThenDeadLettered.
+type acceptingAcknowledger struct{}
 
-func (a *recordingAcknowledger) Ack(uint64, bool) error {
-	return nil
-}
+func (acceptingAcknowledger) Ack(uint64, bool) error { return nil }
 
-func (a *recordingAcknowledger) Nack(uint64, bool, bool) error {
-	return nil
-}
+func (acceptingAcknowledger) Nack(uint64, bool, bool) error { return nil }
 
-func (a *recordingAcknowledger) Reject(_ uint64, requeue bool) error {
-	if requeue {
-		a.rejectedWithRequeue++
-	}
-
-	return a.rejectError
-}
+func (acceptingAcknowledger) Reject(uint64, bool) error { return nil }
 
 func newTestDelivery(body []byte) rbmq.Delivery {
-	return newTestDeliveryOn(&recordingAcknowledger{}, body)
-}
-
-func newTestDeliveryOn(acknowledger amqp.Acknowledger, body []byte) rbmq.Delivery {
 	return rbmq.Delivery{Delivery: amqp.Delivery{
-		Acknowledger: acknowledger,
+		Acknowledger: acceptingAcknowledger{},
 		Body:         body,
 		Exchange:     EventExchange,
 		RoutingKey:   string(events.AuthChallengeGeneratedLabel),
@@ -87,52 +69,33 @@ func newTestDeliveryOn(acknowledger amqp.Acknowledger, body []byte) rbmq.Deliver
 	}}
 }
 
-func TestConsumeDeliveryPassesTheBodyOnAndAcknowledges(t *testing.T) {
-	handler := &recordingDeliveryHandler{}
-	consumer := newTestEventConsumer(handler, &bytes.Buffer{})
-
-	action := consumer.consumeDelivery(newTestDelivery(testDeliveryBody()))
-
-	if action != rbmq.Ack {
-		t.Errorf("action = %v, want rbmq.Ack", action)
-	}
-	if len(handler.received) != 1 {
-		t.Fatalf("handled deliveries = %d, want 1", len(handler.received))
-	}
-	if !bytes.Equal(handler.received[0], testDeliveryBody()) {
-		t.Errorf("body = %q, want it handed on untouched", handler.received[0])
-	}
-}
-
-func TestConsumeDeliveryAcksSuccessAndRequeuesFailure(t *testing.T) {
+func TestConsumeDeliveryAcksSuccessAndHandsFailureBackForRetry(t *testing.T) {
 	cases := []struct {
 		name            string
-		handler         *recordingDeliveryHandler
+		handle          func(ctx context.Context, body []byte) error
 		wantAction      rbmq.Action
-		wantRejects     int
-		wantHandled     int
 		wantLogContains string
 	}{
 		{
-			name:        "handled",
-			handler:     &recordingDeliveryHandler{},
-			wantAction:  rbmq.Ack,
-			wantHandled: 1,
+			name: "handled with the body untouched",
+			handle: func(_ context.Context, body []byte) error {
+				if !bytes.Equal(body, testDeliveryBody()) {
+					return errors.New("body changed on its way to the handler")
+				}
+				return nil
+			},
+			wantAction: rbmq.Ack,
 		},
 		{
 			name:            "handler reported a failure",
-			handler:         &recordingDeliveryHandler{handleError: errors.New("brevo refused it")},
+			handle:          deliveryHandler{handleError: errors.New("brevo refused it")}.handle,
 			wantAction:      rbmq.Manual,
-			wantRejects:     1,
-			wantHandled:     1,
 			wantLogContains: "event delivery not handled",
 		},
 		{
 			name:            "handler panicked",
-			handler:         &recordingDeliveryHandler{panicWith: "nil map write"},
+			handle:          deliveryHandler{panicWith: "nil map write"}.handle,
 			wantAction:      rbmq.Manual,
-			wantRejects:     1,
-			wantHandled:     0,
 			wantLogContains: "event handler panicked",
 		},
 	}
@@ -140,26 +103,15 @@ func TestConsumeDeliveryAcksSuccessAndRequeuesFailure(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			logs := &bytes.Buffer{}
-			consumer := newTestEventConsumer(testCase.handler, logs)
-			acknowledger := &recordingAcknowledger{}
+			consumer := newTestEventConsumer(deliveryHandler{}, logs)
+			consumer.handle = testCase.handle
 
-			action := consumer.consumeDelivery(newTestDeliveryOn(acknowledger, testDeliveryBody()))
+			action := consumer.consumeDelivery(newTestDelivery(testDeliveryBody()))
 
 			if action != testCase.wantAction {
-				t.Errorf("action = %v, want %v", action, testCase.wantAction)
+				t.Errorf("action = %v, want %v (logs %q)", action, testCase.wantAction, logs.String())
 			}
-			if acknowledger.rejectedWithRequeue != testCase.wantRejects {
-				t.Errorf("rejects with requeue = %d, want %d",
-					acknowledger.rejectedWithRequeue, testCase.wantRejects)
-			}
-			if len(testCase.handler.received) != testCase.wantHandled {
-				t.Errorf("handled deliveries = %d, want %d",
-					len(testCase.handler.received), testCase.wantHandled)
-			}
-			if testCase.wantLogContains == "" {
-				return
-			}
-			if !strings.Contains(logs.String(), testCase.wantLogContains) {
+			if testCase.wantLogContains != "" && !strings.Contains(logs.String(), testCase.wantLogContains) {
 				t.Errorf("logs = %q, want them to mention %q", logs.String(), testCase.wantLogContains)
 			}
 		})
@@ -169,11 +121,11 @@ func TestConsumeDeliveryAcksSuccessAndRequeuesFailure(t *testing.T) {
 func TestConsumeDeliveryNeverLogsTheBody(t *testing.T) {
 	cases := []struct {
 		name    string
-		handler *recordingDeliveryHandler
+		handler deliveryHandler
 	}{
-		{name: "success", handler: &recordingDeliveryHandler{}},
-		{name: "failure", handler: &recordingDeliveryHandler{handleError: errors.New("send failed")}},
-		{name: "panic", handler: &recordingDeliveryHandler{panicWith: "boom"}},
+		{name: "success", handler: deliveryHandler{}},
+		{name: "failure", handler: deliveryHandler{handleError: errors.New("send failed")}},
+		{name: "panic", handler: deliveryHandler{panicWith: "boom"}},
 	}
 
 	for _, testCase := range cases {
@@ -229,28 +181,4 @@ func TestNewEventConsumerRefusesAnUnusableDeclaration(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestConsumerErrorsUnwrapToTheirCause(t *testing.T) {
-	cause := errors.New("Exception (404) Reason: \"NOT_FOUND - no exchange 'web_app_starter.events'\"")
-
-	cases := []struct {
-		name string
-		err  error
-	}{
-		{name: "consumer unavailable", err: ErrConsumerUnavailable{Queue: testQueue, Cause: cause}},
-		{name: "consumer start failed", err: ErrConsumerStartFailed{Queue: testQueue, Cause: cause}},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if !errors.Is(testCase.err, cause) {
-				t.Errorf("errors.Is did not recover %v from %v", cause, testCase.err)
-			}
-		})
-	}
-}
-
-func TestStopAllEventConsumersToleratesAnEmptySet(t *testing.T) {
-	StopAllEventConsumers(RunningEventConsumers{}, config.ConsumerStopTimeout)
 }

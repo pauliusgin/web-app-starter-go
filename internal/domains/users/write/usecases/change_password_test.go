@@ -156,3 +156,17 @@ func TestChangePasswordAnnouncesNothingWhenTheNewHashIsNotStored(t *testing.T) {
 	}
 	harness.assertPasswordNotChanged(t)
 }
+
+func TestChangePasswordRejectsAGoogleOnlyAccount(t *testing.T) {
+	harness := newChangePasswordForTest(t)
+	harness.users.Users = map[uuid.UUID]repositories.InMemoryUser{}
+	harness.userID = seedGoogleUser(t, harness.users, testGoogleSubject)
+	harness.seededHash = ""
+
+	err := harness.change(harness.validParams())
+
+	if !errors.As(err, &e.ErrPasswordNotSet{}) {
+		t.Fatalf("error = %v, want ErrPasswordNotSet", err)
+	}
+	harness.assertPasswordNotChanged(t)
+}

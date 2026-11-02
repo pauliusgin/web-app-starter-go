@@ -16,14 +16,15 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 )
 
-// verificationPathByMessageType is where the frontend serves each link; it must match its routes.
-var verificationPathByMessageType = map[models.MessageType]string{
+// frontendPathByMessageType is where the frontend serves each token link; it must match its routes.
+var frontendPathByMessageType = map[models.MessageType]string{
 	models.EmailVerification: "/verify-email",
+	models.PasswordReset:     "/reset-password",
 }
 
 const verificationLinkParam = "verificationLink"
 
-// VerificationTokenQueryParam is the query parameter the verification link carries its token in.
+// VerificationTokenQueryParam is the query parameter every token link carries its token in.
 const VerificationTokenQueryParam = "token"
 
 // SendVerificationEmailParams is the recipient, the challenge being verified, its token and message type.
@@ -35,8 +36,7 @@ type SendVerificationEmailParams struct {
 	Type           models.MessageType
 }
 
-// SendVerificationEmailDependencies carries the gateway, where the frontend lives, and where the
-// outcome of each send is logged and announced.
+// SendVerificationEmailDependencies carries what sending, logging and announcing an email needs.
 type SendVerificationEmailDependencies struct {
 	Gateway           email.Gateway
 	MessageRepository repositories.MessageWriteRepository
@@ -45,7 +45,7 @@ type SendVerificationEmailDependencies struct {
 	FrontendBaseURL   string
 }
 
-type verificationMessageData struct {
+type challengeMessageData struct {
 	ChallengeID uuid.UUID `json:"challengeId"`
 }
 
@@ -57,11 +57,16 @@ func SendVerificationEmail(
 	params SendVerificationEmailParams,
 ) error {
 
-	if err := ensureParams(params); err != nil {
+	err := ensureTokenMessageRecipient(tokenMessageRecipient{
+		RecipientID:    params.RecipientID,
+		RecipientEmail: params.RecipientEmail,
+		Token:          params.Token,
+	})
+	if err != nil {
 		return err
 	}
 
-	verificationLink, err := buildVerificationLink(buildVerificationLinkParams{
+	verificationLink, err := buildTokenLink(buildTokenLinkParams{
 		FrontendBaseURL: d.FrontendBaseURL,
 		Token:           params.Token,
 		Type:            params.Type,
@@ -100,7 +105,7 @@ type buildVerificationMessageParams struct {
 }
 
 func buildVerificationMessage(p buildVerificationMessageParams) models.NewMessage {
-	data, _ := json.Marshal(verificationMessageData{ChallengeID: p.Params.ChallengeID})
+	data, _ := json.Marshal(challengeMessageData{ChallengeID: p.Params.ChallengeID})
 
 	return models.New(models.NewMessageParams{
 		RecipientID:    p.Params.RecipientID,
@@ -114,7 +119,13 @@ func buildVerificationMessage(p buildVerificationMessageParams) models.NewMessag
 	})
 }
 
-func ensureParams(params SendVerificationEmailParams) error {
+type tokenMessageRecipient struct {
+	RecipientID    uuid.UUID
+	RecipientEmail string
+	Token          string
+}
+
+func ensureTokenMessageRecipient(params tokenMessageRecipient) error {
 	if params.RecipientID == uuid.Nil {
 		return e.ErrRecipientIDMissing{}
 	}
@@ -128,14 +139,14 @@ func ensureParams(params SendVerificationEmailParams) error {
 	return nil
 }
 
-type buildVerificationLinkParams struct {
+type buildTokenLinkParams struct {
 	FrontendBaseURL string
 	Token           string
 	Type            models.MessageType
 }
 
-func buildVerificationLink(params buildVerificationLinkParams) (string, error) {
-	verificationPath, supported := verificationPathByMessageType[params.Type]
+func buildTokenLink(params buildTokenLinkParams) (string, error) {
+	frontendPath, supported := frontendPathByMessageType[params.Type]
 	if !supported {
 		return "", e.ErrVerificationMessageTypeUnsupported{Type: string(params.Type)}
 	}
@@ -154,11 +165,11 @@ func buildVerificationLink(params buildVerificationLinkParams) (string, error) {
 		return "", e.ErrFrontendBaseURLIncomplete{FrontendBaseURL: params.FrontendBaseURL}
 	}
 
-	verificationLink := baseURL.JoinPath(verificationPath)
+	tokenLink := baseURL.JoinPath(frontendPath)
 
-	query := verificationLink.Query()
+	query := tokenLink.Query()
 	query.Set(VerificationTokenQueryParam, params.Token)
-	verificationLink.RawQuery = query.Encode()
+	tokenLink.RawQuery = query.Encode()
 
-	return verificationLink.String(), nil
+	return tokenLink.String(), nil
 }

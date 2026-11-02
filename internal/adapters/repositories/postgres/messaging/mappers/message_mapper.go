@@ -33,8 +33,7 @@ func MessageMapper(row sqlc.MessagingLog) (models.Message, error) {
 	return mapped, nil
 }
 
-// SaveMessageParamsMapper maps a message about to be logged onto the insert query's parameters,
-// storing empty optional strings as NULL.
+// SaveMessageParamsMapper maps a new message onto insert params, storing empty optionals as NULL.
 func SaveMessageParamsMapper(newMessage models.NewMessage) sqlc.SaveMessageParams {
 	// Marshalling a string slice cannot fail.
 	encodedErrors, _ := json.Marshal(newMessage.Errors)

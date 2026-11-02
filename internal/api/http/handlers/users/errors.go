@@ -12,21 +12,33 @@ const verificationLinkNotYoursText = "this verification link was not issued to t
 
 const unexpectedVerificationFailureText = "could not verify the email address"
 
-const verificationRejectedText = "rejected an email verification"
-
 const unexpectedEmailChangeRequestFailureText = "could not request the email change"
 
 const unexpectedPasswordChangeFailureText = "could not change the password"
 
+const unexpectedPasswordAdditionFailureText = "could not add the password"
+
+const passwordResetTokenRequiredText = "a password reset token is required"
+
+const invalidPasswordResetLinkText = "this password reset link is not valid or has expired"
+
+const unexpectedPasswordResetFailureText = "could not reset the password"
+
+const unexpectedGoogleAccountAdditionFailureText = "could not add the google account"
+
 const unexpectedSignInFailureText = "could not sign the user in"
+
+const unexpectedGoogleSignUpFailureText = "could not create the user with google"
+
+const unexpectedGoogleSignInFailureText = "could not sign the user in with google"
+
+const unexpectedGoogleSignInConfigFailureText = "could not load the google sign-in config"
 
 const unexpectedDeletionFailureText = "could not delete the user"
 
-const deletionRejectedText = "rejected a user deletion"
+const userNotFoundText = "user not found"
 
 const unexpectedUserLookupFailureText = "could not load the user"
-
-const userNotFoundText = "user not found"
 
 // ErrVerificationTokenMissing reports a verify request that carried no token query parameter.
 type ErrVerificationTokenMissing struct{}

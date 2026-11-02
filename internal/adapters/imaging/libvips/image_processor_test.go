@@ -48,6 +48,26 @@ func encodedPNG(t *testing.T, width, height int) []byte {
 	return encoded.Bytes()
 }
 
+// encodedSignaturePNG is a transparent canvas with one opaque horizontal stroke through its middle,
+// the shape a signature pad exports.
+func encodedSignaturePNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+
+	canvas := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for x := range width {
+		for y := height/2 - 2; y <= height/2+2; y++ {
+			canvas.Set(x, y, color.NRGBA{R: 10, G: 20, B: 90, A: 255})
+		}
+	}
+
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, canvas); err != nil {
+		t.Fatalf("encoding the fixture png: %v", err)
+	}
+
+	return encoded.Bytes()
+}
+
 func decodedWebpBounds(t *testing.T, content []byte) image.Rectangle {
 	t.Helper()
 
@@ -110,6 +130,31 @@ func TestCreatePreviewShrinksIntoTheSquareAsWebp(t *testing.T) {
 					bounds.Dx(), bounds.Dy(), testCase.wantWidth, testCase.wantHeight)
 			}
 		})
+	}
+}
+
+func TestCreatePreviewKeepsTheTransparencyOfAnImage(t *testing.T) {
+	preview, err := processor.CreatePreview(context.Background(), imaging.CreatePreviewParams{
+		Content:    encodedSignaturePNG(t, 400, 100),
+		EdgePixels: 200,
+	})
+	if err != nil {
+		t.Fatalf("CreatePreview: %v", err)
+	}
+
+	decoded, err := webp.Decode(bytes.NewReader(preview))
+	if err != nil {
+		t.Fatalf("the preview is not a decodable webp: %v", err)
+	}
+
+	bounds := decoded.Bounds()
+	_, _, _, cornerAlpha := decoded.At(bounds.Min.X, bounds.Min.Y).RGBA()
+	if cornerAlpha != 0 {
+		t.Errorf("corner alpha = %d, want 0: the transparent background was flattened", cornerAlpha)
+	}
+	_, _, _, strokeAlpha := decoded.At(bounds.Dx()/2, bounds.Dy()/2).RGBA()
+	if strokeAlpha == 0 {
+		t.Error("stroke alpha = 0, want the signature stroke to stay visible")
 	}
 }
 

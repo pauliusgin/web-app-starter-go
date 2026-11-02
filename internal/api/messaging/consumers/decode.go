@@ -12,10 +12,10 @@ type decodeEventPayloadParams struct {
 }
 
 func decodeEventPayload[Payload any](params decodeEventPayloadParams) (Payload, error) {
-	payload := *new(Payload)
-
+	var payload Payload
 	if err := json.Unmarshal(params.Body, &payload); err != nil {
-		return *new(Payload), ErrEventPayloadUndecodable{Label: params.Label, Cause: err}
+		var undecoded Payload
+		return undecoded, ErrEventPayloadUndecodable{Label: params.Label, Cause: err}
 	}
 
 	return payload, nil

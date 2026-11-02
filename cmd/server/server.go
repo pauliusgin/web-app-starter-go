@@ -16,6 +16,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/routes"
 	httpserver "github.com/pauliusgin/web_app_starter-be/internal/api/http/server"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/googleidtoken"
 	"github.com/pauliusgin/web_app_starter-be/internal/config"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/messaging/gateways/email"
 	"github.com/pauliusgin/web_app_starter-be/internal/scheduler"
@@ -26,6 +27,7 @@ type startupSteps struct {
 	ConnectDatabase         func(ctx context.Context, databaseURL string) (*sql.DB, error)
 	OpenEventBroker         func(params openEventBrokerParams) (eventBroker, error)
 	BuildEmailGateway       func(brevoConfig config.BrevoConfig) (email.Gateway, error)
+	BuildGoogleVerifier     func(googleConfig config.GoogleConfig) (googleidtoken.Verifier, error)
 	BuildFileStorage        func(firebaseConfig config.FirebaseConfig) (fileStorageResource, error)
 	BuildImageProcessor     func() (imageProcessorResource, error)
 	StartEventConsumers     func(params startEventConsumersParams) (func(), error)
@@ -40,6 +42,7 @@ func serverStartupSteps() startupSteps {
 		ConnectDatabase:         postgres.NewDatabaseConnection,
 		OpenEventBroker:         openEventBroker,
 		BuildEmailGateway:       buildEmailGateway,
+		BuildGoogleVerifier:     buildGoogleIDTokenVerifier,
 		BuildFileStorage:        buildFileStorage,
 		BuildImageProcessor:     buildImageProcessor,
 		StartEventConsumers:     startEventConsumers,
@@ -56,6 +59,11 @@ func runServer(s startupSteps) error {
 	}
 
 	emailGateway, err := s.BuildEmailGateway(cfg.Brevo)
+	if err != nil {
+		return err
+	}
+
+	googleIDTokenVerifier, err := s.BuildGoogleVerifier(cfg.Google)
 	if err != nil {
 		return err
 	}
@@ -136,9 +144,11 @@ func runServer(s startupSteps) error {
 		Database:       db,
 		EventPublisher: broker.Publisher,
 		JWTSecret:      cfg.JWTSecret,
-		AppEnv:         cfg.AppEnv,
+		AppEnv:         string(cfg.AppEnv),
 		FileStorage:    fileStorage.FileStorage,
 		ImageProcessor: imageProcessor.ImageProcessor,
+		GoogleVerifier: googleIDTokenVerifier,
+		GoogleClientID: cfg.Google.ClientID,
 	})
 	if err != nil {
 		return err

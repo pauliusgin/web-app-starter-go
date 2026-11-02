@@ -18,6 +18,7 @@ type CreatePreviewParams struct {
 
 // ImageProcessor is the outbound image port the domain calls and an imaging library adapter implements.
 type ImageProcessor interface {
+	// InspectImage reads the image's dimensions from its header without decoding the pixels.
 	InspectImage(ctx context.Context, content []byte) (ImageInfo, error)
 
 	// CreatePreview returns the image upright, shrunk to the requested square and encoded as WebP.

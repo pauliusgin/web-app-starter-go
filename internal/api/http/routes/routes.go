@@ -11,6 +11,7 @@ type RouterDependencies struct {
 	Auth     TokenRoutesDependencies
 	Uploads  UploadRoutesDependencies
 	Profiles ProfileRoutesDependencies
+	Messages MessageRoutesDependencies
 }
 
 // BuildRouter returns one mux holding every API route under its full pattern.
@@ -22,6 +23,7 @@ func BuildRouter(dependencies RouterDependencies) http.Handler {
 	RegisterTokenRoutes(mux, dependencies.Auth)
 	RegisterUploadRoutes(mux, dependencies.Uploads)
 	RegisterProfileRoutes(mux, dependencies.Profiles)
+	RegisterMessageRoutes(mux, dependencies.Messages)
 
 	return mux
 }

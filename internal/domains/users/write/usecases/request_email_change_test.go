@@ -17,6 +17,7 @@ const otherAccountEmail = "taken@example.com"
 type requestEmailChangeForTest struct {
 	users      *repositories.InMemoryUserRepository
 	challenges challengeLinks
+	issuance   inMemoryIssuanceGuard
 	userID     uuid.UUID
 }
 
@@ -30,14 +31,16 @@ func newRequestEmailChangeForTest(t *testing.T) requestEmailChangeForTest {
 	return requestEmailChangeForTest{
 		users:      users,
 		challenges: newChallengeLinks(),
+		issuance:   inMemoryIssuanceGuard{rateLimitedTargets: map[string]bool{}},
 		userID:     userID,
 	}
 }
 
 func (h requestEmailChangeForTest) request(newEmail string) error {
 	return RequestEmailChange(context.Background(), RequestEmailChangeDependencies{
-		UserWriteRepository:   h.users,
-		GenerateAuthChallenge: h.challenges.generate,
+		UserWriteRepository:            h.users,
+		EnsureChallengeIssuanceAllowed: h.issuance.ensureAllowed,
+		GenerateAuthChallenge:          h.challenges.generate,
 	}, RequestEmailChangeParams{UserID: h.userID, NewEmail: newEmail})
 }
 
@@ -52,9 +55,10 @@ func (h requestEmailChangeForTest) assertEmailChangeNotRequested(t *testing.T) {
 
 func TestRequestEmailChangeSendsALinkToTheNewAddressAndKeepsTheCurrentOne(t *testing.T) {
 	harness := newRequestEmailChangeForTest(t)
+	harness.issuance.rateLimitedTargets[testEmail] = true
 
 	if err := harness.request(requestedNewEmail); err != nil {
-		t.Fatalf("RequestEmailChange: %v", err)
+		t.Fatalf("RequestEmailChange: %v, want the current address's rate limit not to apply", err)
 	}
 
 	wantLink := challenge.GenerateParams{
@@ -76,12 +80,14 @@ func TestRequestEmailChangeRejectsAnAddressItCannotMoveTo(t *testing.T) {
 		wantErr  func(err error) bool
 	}{
 		{name: "current email", newEmail: testEmail, wantErr: isError[e.ErrEmailUnchanged]},
+		// The taken check runs before the rate limit, so a held address never reads as merely throttled.
 		{name: "held by another account", newEmail: otherAccountEmail, wantErr: isError[e.ErrEmailTaken]},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			harness := newRequestEmailChangeForTest(t)
+			harness.issuance.rateLimitedTargets[testCase.newEmail] = true
 
 			err := harness.request(testCase.newEmail)
 
@@ -99,6 +105,13 @@ func TestRequestEmailChangeSendsNothingWhenRejected(t *testing.T) {
 		arrange func(harness *requestEmailChangeForTest)
 		wantErr func(err error) bool
 	}{
+		{
+			name: "rate limited new address",
+			arrange: func(harness *requestEmailChangeForTest) {
+				harness.issuance.rateLimitedTargets[requestedNewEmail] = true
+			},
+			wantErr: isError[challenge.ErrIssuanceRateLimited],
+		},
 		{
 			name: "link cannot be created",
 			arrange: func(harness *requestEmailChangeForTest) {

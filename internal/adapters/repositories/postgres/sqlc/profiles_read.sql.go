@@ -7,6 +7,7 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -15,23 +16,37 @@ const getProfileReadModelByID = `-- name: GetProfileReadModelByID :one
 SELECT
   p.id,
   p.first_name,
-  p.last_name
+  p.last_name,
+  p.picture_upload_id,
+  up.preview_url AS picture_preview_url,
+  up.original_url AS picture_original_url
 FROM
   profiles p
+  LEFT JOIN uploads up ON up.id = p.picture_upload_id
 WHERE
   p.id = $1
   AND p.deleted_at IS NULL
 `
 
 type GetProfileReadModelByIDRow struct {
-	ID        uuid.UUID
-	FirstName string
-	LastName  string
+	ID                 uuid.UUID
+	FirstName          string
+	LastName           string
+	PictureUploadID    uuid.NullUUID
+	PicturePreviewUrl  sql.NullString
+	PictureOriginalUrl sql.NullString
 }
 
 func (q *Queries) GetProfileReadModelByID(ctx context.Context, id uuid.UUID) (GetProfileReadModelByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getProfileReadModelByID, id)
 	var i GetProfileReadModelByIDRow
-	err := row.Scan(&i.ID, &i.FirstName, &i.LastName)
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.PictureUploadID,
+		&i.PicturePreviewUrl,
+		&i.PictureOriginalUrl,
+	)
 	return i, err
 }

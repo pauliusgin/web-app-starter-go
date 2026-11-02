@@ -18,14 +18,22 @@ import (
 )
 
 type createProfileRequest struct {
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
+	FirstName       string `json:"firstName"`
+	LastName        string `json:"lastName"`
+	PictureUploadID string `json:"pictureUploadId"`
 }
 
 type createProfileResponse struct {
-	ID        uuid.UUID `json:"id"`
-	FirstName string    `json:"firstName"`
-	LastName  string    `json:"lastName"`
+	ID        uuid.UUID                    `json:"id"`
+	FirstName string                       `json:"firstName"`
+	LastName  string                       `json:"lastName"`
+	Picture   createProfilePictureResponse `json:"picture"`
+}
+
+type createProfilePictureResponse struct {
+	UploadID    *uuid.UUID `json:"uploadId"`
+	PreviewURL  *string    `json:"previewUrl"`
+	OriginalURL *string    `json:"originalUrl"`
 }
 
 // CreateProfileUseCase is the domain call the profile creation handler depends on.
@@ -56,18 +64,26 @@ func CreateProfile(d CreateProfileDependencies) http.HandlerFunc {
 		}
 
 		profileInput, err := input.ValidateProfileInput(input.ProfileInput{
-			FirstName: request.FirstName,
-			LastName:  request.LastName,
+			FirstName:       request.FirstName,
+			LastName:        request.LastName,
+			PictureUploadID: request.PictureUploadID,
 		})
 		if err != nil {
 			writeCreateProfileFailure(w, err)
 			return
 		}
 
+		pictureUploadID, err := parsePictureUploadID(profileInput.PictureUploadID)
+		if err != nil {
+			writeCreateProfileFailure(w, err)
+			return
+		}
+
 		result, err := d.CreateProfile(r.Context(), usecases.CreateProfileParams{
-			UserID:    userID,
-			FirstName: profileInput.FirstName,
-			LastName:  profileInput.LastName,
+			UserID:          userID,
+			FirstName:       profileInput.FirstName,
+			LastName:        profileInput.LastName,
+			PictureUploadID: pictureUploadID,
 		})
 		if err != nil {
 			writeCreateProfileFailure(w, err)
@@ -89,6 +105,11 @@ func buildCreateProfileResponse(profile models.ProfileReadModel) createProfileRe
 		ID:        profile.ID,
 		FirstName: profile.FirstName,
 		LastName:  profile.LastName,
+		Picture: createProfilePictureResponse{
+			UploadID:    profile.Picture.UploadID,
+			PreviewURL:  profile.Picture.PreviewURL,
+			OriginalURL: profile.Picture.OriginalURL,
+		},
 	}
 }
 
@@ -99,8 +120,10 @@ var createProfileRules = []handlers.RejectionRule{
 
 func writeCreateProfileFailure(w http.ResponseWriter, err error) {
 	handlers.WriteRejection(w, handlers.WriteRejectionParams{
-		Err:                   err,
-		RuleSets:              [][]handlers.RejectionRule{handlers.RequestDecodingRules, profileValidationRules, createProfileRules},
+		Err: err,
+		RuleSets: [][]handlers.RejectionRule{
+			handlers.RequestDecodingRules, profileValidationRules, profilePictureRules, createProfileRules,
+		},
 		UnexpectedFailureText: unexpectedProfileCreationFailureText,
 	})
 }

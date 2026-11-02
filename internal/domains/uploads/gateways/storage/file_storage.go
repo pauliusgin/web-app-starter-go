@@ -17,6 +17,7 @@ type StoredFile struct {
 
 // FileStorage is the outbound file port the domain calls and a storage provider adapter implements.
 type FileStorage interface {
+	// StoreFile writes the file at params.Path and answers with the URL it is served from.
 	StoreFile(ctx context.Context, params StoreFileParams) (StoredFile, error)
 
 	// DeleteFile removes the file at path, reporting ErrStoredFileNotFound when nothing is there.

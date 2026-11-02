@@ -1,4 +1,3 @@
-// Package user defines the events dispatched about an account's own lifecycle.
 package user
 
 import (

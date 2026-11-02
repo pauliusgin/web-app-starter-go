@@ -8,6 +8,9 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 const findAuthChallengeByTokenHash = `-- name: FindAuthChallengeByTokenHash :one
@@ -50,4 +53,95 @@ func (q *Queries) FindAuthChallengeByTokenHash(ctx context.Context, tokenHash sq
 		&i.UsedAt,
 	)
 	return i, err
+}
+
+const listAuthChallengeCreatedAtByTarget = `-- name: ListAuthChallengeCreatedAtByTarget :many
+SELECT
+  ac.created_at
+FROM
+  auth_challenges ac
+WHERE
+  ac.user_id = $1
+  AND ac.target = $2
+  AND ac.purpose = $3
+  AND ac.created_at > $4
+ORDER BY
+  ac.created_at
+`
+
+type ListAuthChallengeCreatedAtByTargetParams struct {
+	UserID       uuid.UUID
+	Target       string
+	Purpose      string
+	CreatedAfter time.Time
+}
+
+func (q *Queries) ListAuthChallengeCreatedAtByTarget(ctx context.Context, arg ListAuthChallengeCreatedAtByTargetParams) ([]time.Time, error) {
+	rows, err := q.db.QueryContext(ctx, listAuthChallengeCreatedAtByTarget,
+		arg.UserID,
+		arg.Target,
+		arg.Purpose,
+		arg.CreatedAfter,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []time.Time
+	for rows.Next() {
+		var created_at time.Time
+		if err := rows.Scan(&created_at); err != nil {
+			return nil, err
+		}
+		items = append(items, created_at)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuthChallengeCreatedAtByUser = `-- name: ListAuthChallengeCreatedAtByUser :many
+SELECT
+  ac.created_at
+FROM
+  auth_challenges ac
+WHERE
+  ac.user_id = $1
+  AND ac.purpose = $2
+  AND ac.created_at > $3
+ORDER BY
+  ac.created_at
+`
+
+type ListAuthChallengeCreatedAtByUserParams struct {
+	UserID       uuid.UUID
+	Purpose      string
+	CreatedAfter time.Time
+}
+
+func (q *Queries) ListAuthChallengeCreatedAtByUser(ctx context.Context, arg ListAuthChallengeCreatedAtByUserParams) ([]time.Time, error) {
+	rows, err := q.db.QueryContext(ctx, listAuthChallengeCreatedAtByUser, arg.UserID, arg.Purpose, arg.CreatedAfter)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []time.Time
+	for rows.Next() {
+		var created_at time.Time
+		if err := rows.Scan(&created_at); err != nil {
+			return nil, err
+		}
+		items = append(items, created_at)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

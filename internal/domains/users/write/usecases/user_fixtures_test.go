@@ -62,6 +62,25 @@ func seedUser(t *testing.T, users *repositories.InMemoryUserRepository, params s
 	return seeded.ID
 }
 
+const testGoogleSubject = "109876543210987654321"
+
+// seedGoogleUser stores a verified, password-less user signed up with the google account.
+func seedGoogleUser(t *testing.T, users *repositories.InMemoryUserRepository, googleSubject string) uuid.UUID {
+	t.Helper()
+
+	seeded := models.User{
+		ID:              uuid.New(),
+		Email:           testEmail,
+		CreatedAt:       fixedSeededAt,
+		UpdatedAt:       fixedSeededAt,
+		EmailVerifiedAt: fixedSeededAt,
+		SigninAt:        fixedSeededAt,
+	}
+	users.Users[seeded.ID] = repositories.InMemoryUser{User: seeded, GoogleSubject: googleSubject}
+
+	return seeded.ID
+}
+
 func storedUser(t *testing.T, users *repositories.InMemoryUserRepository, userID uuid.UUID) repositories.InMemoryUser {
 	t.Helper()
 
@@ -114,6 +133,19 @@ func (l challengeLinks) assertOnlyLinkSent(t *testing.T, want challenge.Generate
 	if sent != want || stored.IsUsed() || stored.TokenHash == "" {
 		t.Errorf("stored challenge = %+v, want an unused one for %+v", stored, want)
 	}
+}
+
+// inMemoryIssuanceGuard stands in for challenge.EnsureIssuanceAllowed, whose rules are tested in its package.
+type inMemoryIssuanceGuard struct {
+	rateLimitedTargets map[string]bool
+}
+
+func (g inMemoryIssuanceGuard) ensureAllowed(_ context.Context, params challenge.EnsureIssuanceAllowedParams) error {
+	if g.rateLimitedTargets[params.Target] {
+		return challenge.ErrIssuanceRateLimited{RetryAfter: 20 * time.Second}
+	}
+
+	return nil
 }
 
 // isError reports whether err is, or wraps, an E; table cases name the rejection they expect with it.

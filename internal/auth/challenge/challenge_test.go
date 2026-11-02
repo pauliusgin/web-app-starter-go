@@ -27,7 +27,7 @@ func TestIsUsedReadsTheZeroTimeAsUnused(t *testing.T) {
 }
 
 func TestIsExpiredComparesAgainstTheInstantItIsGiven(t *testing.T) {
-	expiresAt := fixedCreatedAt.Add(Lifetime)
+	expiresAt := fixedCreatedAt.Add(DefaultLifetime)
 
 	cases := []struct {
 		name        string

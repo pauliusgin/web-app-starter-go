@@ -1,5 +1,4 @@
-// Package events defines the domain events the application dispatches, announces on the broker, and
-// records in the event_log table.
+// Package events defines domain events, publishes them to the broker and records them in event_log.
 package events
 
 import (

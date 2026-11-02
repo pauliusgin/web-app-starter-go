@@ -14,6 +14,7 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
 const testAppEnv = "test"
@@ -28,30 +29,12 @@ var errStorageDown = errors.New("storage unreachable")
 
 var errDatabaseDown = errors.New("database unreachable")
 
-type capturedEvents struct {
-	recorded  []events.NewEvent
-	published []events.NewEvent
-}
-
-func (c *capturedEvents) dispatcher() events.Dispatcher {
-	return events.Dispatcher{
-		Recorder: func(_ context.Context, event events.NewEvent) error {
-			c.recorded = append(c.recorded, event)
-			return nil
-		},
-		Publisher: func(_ context.Context, event events.NewEvent) error {
-			c.published = append(c.published, event)
-			return nil
-		},
-	}
-}
-
 // uploadFilesFixture wires the use case to in-memory collaborators it can be inspected through.
 type uploadFilesFixture struct {
 	repository     *repositories.InMemoryUploadRepository
 	fileStorage    *storage.InMemoryFileStorage
 	imageProcessor *imaging.InMemoryImageProcessor
-	captured       *capturedEvents
+	captured       *eventstest.CapturedEvents
 }
 
 func newUploadFilesFixture() uploadFilesFixture {
@@ -59,7 +42,7 @@ func newUploadFilesFixture() uploadFilesFixture {
 		repository:     repositories.NewInMemoryUploadRepository(),
 		fileStorage:    storage.NewInMemoryFileStorage(),
 		imageProcessor: imaging.NewInMemoryImageProcessor(imaging.ImageInfo{Width: 1600, Height: 1200}),
-		captured:       &capturedEvents{},
+		captured:       &eventstest.CapturedEvents{},
 	}
 }
 
@@ -68,7 +51,7 @@ func (f uploadFilesFixture) upload(params UploadFilesParams) (UploadFilesResult,
 		UploadWriteRepository: f.repository,
 		FileStorage:           f.fileStorage,
 		ImageProcessor:        f.imageProcessor,
-		EventDispatcher:       f.captured.dispatcher(),
+		EventDispatcher:       f.captured.Dispatcher(),
 		AppEnv:                testAppEnv,
 	}, params)
 }
@@ -98,15 +81,15 @@ func assertNothingUploaded(t *testing.T, f uploadFilesFixture, uploads []models.
 	if len(f.repository.Uploads) != 0 {
 		t.Errorf("saved uploads = %+v, want none", f.repository.Uploads)
 	}
-	if len(f.captured.recorded) != 0 || len(f.captured.published) != 0 {
-		t.Errorf("recorded = %d, published = %d, want no events", len(f.captured.recorded), len(f.captured.published))
+	if len(f.captured.Recorded) != 0 || len(f.captured.Published) != 0 {
+		t.Errorf("recorded = %d, published = %d, want no events", len(f.captured.Recorded), len(f.captured.Published))
 	}
 }
 
-func TestUploadFilesStoresAnImageWithItsPreviewAndRecordsItPending(t *testing.T) {
+func TestUploadFilesStoresAnAttachedImageWithItsPreviewAndRecordsItPending(t *testing.T) {
 	fixture := newUploadFilesFixture()
 
-	result, err := fixture.upload(uploadParams(models.PurposeProfilePicture, jpegFile("me.jpg")))
+	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, jpegFile("scan.jpg")))
 	if err != nil {
 		t.Fatalf("UploadFiles: %v", err)
 	}
@@ -118,14 +101,14 @@ func TestUploadFilesStoresAnImageWithItsPreviewAndRecordsItPending(t *testing.T)
 	paths := models.BuildStoragePaths(models.StoragePathsParams{
 		AppEnv:    testAppEnv,
 		UserID:    testUserID,
-		Purpose:   models.PurposeProfilePicture,
+		Purpose:   models.PurposeDocumentAttachment,
 		UploadID:  upload.ID,
 		Extension: "jpg",
 	})
 	want := models.Upload{
 		ID:           upload.ID,
 		UserID:       testUserID,
-		Purpose:      models.PurposeProfilePicture,
+		Purpose:      models.PurposeDocumentAttachment,
 		Kind:         models.KindImage,
 		MimeType:     "image/jpeg",
 		SizeBytes:    int64(len(jpegContent)),
@@ -157,13 +140,94 @@ func TestUploadFilesStoresAnImageWithItsPreviewAndRecordsItPending(t *testing.T)
 		t.Errorf("stored original = %+v, want the uploaded jpeg bytes", original)
 	}
 	preview := fixture.fileStorage.Files[paths.Preview]
-	if preview.ContentType != models.PreviewMimeType || !bytes.Equal(preview.Content, imaging.InMemoryPreviewContent(512)) {
-		t.Errorf("stored preview = %+v, want the 512px webp preview", preview)
+	if preview.ContentType != models.PreviewMimeType || !bytes.Equal(preview.Content, imaging.InMemoryPreviewContent(1024)) {
+		t.Errorf("stored preview = %+v, want the 1024px webp preview", preview)
 	}
 
-	wantPreview := imaging.CreatePreviewParams{Content: jpegContent, EdgePixels: 512, Crop: true}
+	wantPreview := imaging.CreatePreviewParams{Content: jpegContent, EdgePixels: 1024, Crop: false}
 	if len(fixture.imageProcessor.Previewed) != 1 || !samePreviewRequest(fixture.imageProcessor.Previewed[0], wantPreview) {
-		t.Errorf("preview requests = %+v, want one square crop at 512px", fixture.imageProcessor.Previewed)
+		t.Errorf("preview requests = %+v, want one 1024px fit", fixture.imageProcessor.Previewed)
+	}
+}
+
+func TestUploadFilesAcceptsAsManyAttachmentsAsThePurposeAllows(t *testing.T) {
+	fixture := newUploadFilesFixture()
+	attachments := make([]IncomingFile, models.MaxFilesPerUpload)
+	for index := range attachments {
+		attachments[index] = jpegFile("photo.jpg")
+	}
+
+	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, attachments...))
+	if err != nil {
+		t.Fatalf("UploadFiles: %v", err)
+	}
+
+	if len(result.Uploads) != models.MaxFilesPerUpload || len(fixture.repository.Uploads) != models.MaxFilesPerUpload {
+		t.Errorf("uploads = %d, saved = %d, want %d each",
+			len(result.Uploads), len(fixture.repository.Uploads), models.MaxFilesPerUpload)
+	}
+	if len(fixture.fileStorage.Files) != 2*models.MaxFilesPerUpload {
+		t.Errorf("stored files = %d, want an original and a preview per attachment", len(fixture.fileStorage.Files))
+	}
+}
+
+func TestUploadFilesKeepsOnlyThePreviewOfAPreviewOnlyImage(t *testing.T) {
+	cases := []struct {
+		name        string
+		purpose     models.Purpose
+		wantPreview imaging.CreatePreviewParams
+	}{
+		{
+			name:        "profile picture",
+			purpose:     models.PurposeProfilePicture,
+			wantPreview: imaging.CreatePreviewParams{Content: jpegContent, EdgePixels: 512, Crop: true},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newUploadFilesFixture()
+
+			result, err := fixture.upload(uploadParams(testCase.purpose, jpegFile("picture.jpg")))
+			if err != nil {
+				t.Fatalf("UploadFiles: %v", err)
+			}
+
+			upload := result.Uploads[0]
+			paths := models.BuildStoragePaths(models.StoragePathsParams{
+				AppEnv:    testAppEnv,
+				UserID:    testUserID,
+				Purpose:   testCase.purpose,
+				UploadID:  upload.ID,
+				Extension: "jpg",
+			})
+			previewContent := imaging.InMemoryPreviewContent(testCase.wantPreview.EdgePixels)
+			want := models.Upload{
+				ID:          upload.ID,
+				UserID:      testUserID,
+				Purpose:     testCase.purpose,
+				Kind:        models.KindImage,
+				MimeType:    models.PreviewMimeType,
+				SizeBytes:   int64(len(previewContent)),
+				Width:       1600,
+				Height:      1200,
+				PreviewPath: paths.Preview,
+				PreviewURL:  storage.InMemoryFileURL(paths.Preview),
+				CreatedAt:   upload.CreatedAt,
+				UpdatedAt:   upload.CreatedAt,
+			}
+			if upload != want {
+				t.Errorf("upload = %+v\nwant     %+v", upload, want)
+			}
+
+			preview, stored := fixture.fileStorage.Files[paths.Preview]
+			if len(fixture.fileStorage.Files) != 1 || !stored || !bytes.Equal(preview.Content, previewContent) {
+				t.Errorf("stored files = %v, want only the preview", fixture.fileStorage.Files)
+			}
+			if len(fixture.imageProcessor.Previewed) != 1 || !samePreviewRequest(fixture.imageProcessor.Previewed[0], testCase.wantPreview) {
+				t.Errorf("preview requests = %+v, want %+v", fixture.imageProcessor.Previewed, testCase.wantPreview)
+			}
+		})
 	}
 }
 
@@ -174,7 +238,7 @@ func samePreviewRequest(got, want imaging.CreatePreviewParams) bool {
 func TestUploadFilesStoresADocumentWithoutAPreview(t *testing.T) {
 	fixture := newUploadFilesFixture()
 
-	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, pdfFile("document.pdf")))
+	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, pdfFile("contract.pdf")))
 	if err != nil {
 		t.Fatalf("UploadFiles: %v", err)
 	}
@@ -199,15 +263,16 @@ func TestUploadFilesStoresADocumentWithoutAPreview(t *testing.T) {
 
 func TestUploadFilesStoresEveryFileInRequestOrder(t *testing.T) {
 	fixture := newUploadFilesFixture()
+	pngContent := []byte("\x89PNG\r\n\x1a\n png bytes")
 
 	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment,
-		jpegFile("scan.jpg"), pdfFile("document.pdf")))
+		jpegFile("wall.jpg"), IncomingFile{Name: "floor.png", Content: pngContent}))
 	if err != nil {
 		t.Fatalf("UploadFiles: %v", err)
 	}
 
-	if len(result.Uploads) != 2 || result.Uploads[0].Kind != models.KindImage || result.Uploads[1].Kind != models.KindDocument {
-		t.Fatalf("uploads = %+v, want the image then the document", result.Uploads)
+	if len(result.Uploads) != 2 || result.Uploads[0].MimeType != "image/jpeg" || result.Uploads[1].MimeType != "image/png" {
+		t.Fatalf("uploads = %+v, want the jpeg then the png", result.Uploads)
 	}
 	if result.Uploads[0].ID == result.Uploads[1].ID {
 		t.Error("both uploads share an id, want one id each")
@@ -215,8 +280,8 @@ func TestUploadFilesStoresEveryFileInRequestOrder(t *testing.T) {
 	if len(fixture.repository.Uploads) != 2 {
 		t.Errorf("saved uploads = %d, want 2", len(fixture.repository.Uploads))
 	}
-	if len(fixture.fileStorage.Files) != 3 {
-		t.Errorf("stored files = %d, want image original + preview + pdf", len(fixture.fileStorage.Files))
+	if len(fixture.fileStorage.Files) != 4 {
+		t.Errorf("stored files = %d, want an original and a preview per image", len(fixture.fileStorage.Files))
 	}
 }
 
@@ -224,16 +289,16 @@ func TestUploadFilesAnnouncesEachStoredUpload(t *testing.T) {
 	fixture := newUploadFilesFixture()
 
 	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment,
-		jpegFile("scan.jpg"), pdfFile("document.pdf")))
+		jpegFile("wall.jpg"), jpegFile("floor.jpg")))
 	if err != nil {
 		t.Fatalf("UploadFiles: %v", err)
 	}
 
-	if len(fixture.captured.recorded) != 2 || len(fixture.captured.published) != 2 {
+	if len(fixture.captured.Recorded) != 2 || len(fixture.captured.Published) != 2 {
 		t.Fatalf("recorded = %d, published = %d, want 2 each",
-			len(fixture.captured.recorded), len(fixture.captured.published))
+			len(fixture.captured.Recorded), len(fixture.captured.Published))
 	}
-	for index, event := range fixture.captured.published {
+	for index, event := range fixture.captured.Published {
 		if event.Label != events.UploadCreatedLabel {
 			t.Errorf("event %d label = %q, want %q", index, event.Label, events.UploadCreatedLabel)
 		}
@@ -246,31 +311,11 @@ func TestUploadFilesAnnouncesEachStoredUpload(t *testing.T) {
 	}
 }
 
-func TestUploadFilesSucceedsWhenTheEventCannotBeDispatched(t *testing.T) {
-	fixture := newUploadFilesFixture()
-	failing := func(context.Context, events.NewEvent) error { return errors.New("broker down") }
-
-	result, err := UploadFiles(context.Background(), UploadFilesDependencies{
-		UploadWriteRepository: fixture.repository,
-		FileStorage:           fixture.fileStorage,
-		ImageProcessor:        fixture.imageProcessor,
-		EventDispatcher:       events.Dispatcher{Recorder: failing, Publisher: failing},
-		AppEnv:                testAppEnv,
-	}, uploadParams(models.PurposeProfilePicture, jpegFile("me.jpg")))
-	if err != nil {
-		t.Fatalf("UploadFiles: %v, want success despite the failing dispatcher", err)
-	}
-
-	if len(result.Uploads) != 1 || len(fixture.repository.Uploads) != 1 {
-		t.Errorf("uploads = %d, saved = %d, want 1 each", len(result.Uploads), len(fixture.repository.Uploads))
-	}
-}
-
 func TestUploadFilesRejectsABadRequestBeforeStoringAnything(t *testing.T) {
 	oversizedJPEG := append(append([]byte{}, jpegContent...), make([]byte, 5<<20)...)
-	elevenFiles := make([]IncomingFile, models.MaxFilesPerUpload+1)
-	for index := range elevenFiles {
-		elevenFiles[index] = jpegFile("photo.jpg")
+	tooManyAttachments := make([]IncomingFile, models.MaxFilesPerUpload+1)
+	for index := range tooManyAttachments {
+		tooManyAttachments[index] = jpegFile("photo.jpg")
 	}
 
 	cases := []struct {
@@ -289,8 +334,8 @@ func TestUploadFilesRejectsABadRequestBeforeStoringAnything(t *testing.T) {
 			wantErr: errorOfType[e.ErrUploadFilesMissing](),
 		},
 		{
-			name:    "too many files",
-			params:  uploadParams(models.PurposeDocumentAttachment, elevenFiles...),
+			name:    "too many attachments",
+			params:  uploadParams(models.PurposeDocumentAttachment, tooManyAttachments...),
 			wantErr: errorOfType[e.ErrTooManyUploadFiles](),
 		},
 		{
@@ -404,7 +449,7 @@ func TestUploadFilesDiscardsTheOriginalWhenThePreviewFails(t *testing.T) {
 			fixture := newUploadFilesFixture()
 			testCase.arrange(fixture)
 
-			result, err := fixture.upload(uploadParams(models.PurposeProfilePicture, jpegFile("me.jpg")))
+			result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, jpegFile("scan.jpg")))
 
 			if !testCase.wantErr(err) {
 				t.Fatalf("err = %v (%T), want the preview failure", err, err)
@@ -417,11 +462,26 @@ func TestUploadFilesDiscardsTheOriginalWhenThePreviewFails(t *testing.T) {
 	}
 }
 
+func TestUploadFilesStoresNothingWhenAPreviewOnlyImageCannotBePreviewed(t *testing.T) {
+	fixture := newUploadFilesFixture()
+	fixture.imageProcessor.PreviewFailure = errors.New("vips failed")
+
+	result, err := fixture.upload(uploadParams(models.PurposeProfilePicture, jpegFile("picture.jpg")))
+
+	if _, ok := errors.AsType[e.ErrCreatePreviewFailed](err); !ok {
+		t.Fatalf("err = %v, want ErrCreatePreviewFailed", err)
+	}
+	if len(fixture.fileStorage.Deleted) != 0 {
+		t.Errorf("discarded = %v, want nothing, as no original is stored", fixture.fileStorage.Deleted)
+	}
+	assertNothingUploaded(t, fixture, result.Uploads)
+}
+
 func TestUploadFilesReportsAnOriginalTheStorageRefuses(t *testing.T) {
 	fixture := newUploadFilesFixture()
 	fixture.fileStorage.StoreFailure = errStorageDown
 
-	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, pdfFile("document.pdf")))
+	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, pdfFile("contract.pdf")))
 
 	if _, ok := errors.AsType[e.ErrStoreFileFailed](err); !ok || !errors.Is(err, errStorageDown) {
 		t.Fatalf("err = %v, want ErrStoreFileFailed wrapping the storage failure", err)
@@ -436,7 +496,7 @@ func TestUploadFilesDiscardsStoredFilesWhenTheRowCannotBeSaved(t *testing.T) {
 	fixture := newUploadFilesFixture()
 	fixture.repository.SaveFailure = errDatabaseDown
 
-	result, err := fixture.upload(uploadParams(models.PurposeProfilePicture, jpegFile("me.jpg")))
+	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment, jpegFile("scan.jpg")))
 
 	if !errors.Is(err, errDatabaseDown) {
 		t.Fatalf("err = %v, want the save failure", err)
@@ -450,10 +510,10 @@ func TestUploadFilesDiscardsStoredFilesWhenTheRowCannotBeSaved(t *testing.T) {
 func TestUploadFilesKeepsEarlierUploadsPendingWhenALaterOneFails(t *testing.T) {
 	fixture := newUploadFilesFixture()
 	fixture.fileStorage.StoreFailure = errStorageDown
-	fixture.fileStorage.StoresBeforeFailure = 1
+	fixture.fileStorage.StoresBeforeFailure = 2
 
 	result, err := fixture.upload(uploadParams(models.PurposeDocumentAttachment,
-		pdfFile("first.pdf"), pdfFile("second.pdf")))
+		jpegFile("first.jpg"), jpegFile("second.jpg")))
 
 	if !errors.Is(err, errStorageDown) {
 		t.Fatalf("err = %v, want the storage failure", err)

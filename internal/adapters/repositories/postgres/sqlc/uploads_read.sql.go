@@ -39,7 +39,7 @@ type GetUploadReadModelByIDRow struct {
 	Purpose     string
 	Kind        string
 	MimeType    string
-	OriginalUrl string
+	OriginalUrl sql.NullString
 	PreviewUrl  sql.NullString
 }
 

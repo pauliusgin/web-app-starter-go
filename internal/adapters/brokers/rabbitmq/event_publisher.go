@@ -73,7 +73,7 @@ func (p EventPublisher) PublishEvent(ctx context.Context, event events.NewEvent)
 		return ErrPublishFailed{Label: event.Label, RoutingKey: message.routingKey, Cause: err}
 	}
 
-	return awaitPublishConfirmation(ctx, confirmations, message)
+	return awaitPublishConfirmation(ctx, awaitPublishConfirmationParams{Confirmations: confirmations, Message: message})
 }
 
 // Close stops the publisher, and must be called before closing the connection it was built on.
@@ -99,7 +99,13 @@ func buildEventMessage(event events.NewEvent) eventMessage {
 	}
 }
 
-func awaitPublishConfirmation(ctx context.Context, confirmations rbmq.PublisherConfirmation, message eventMessage) error {
+type awaitPublishConfirmationParams struct {
+	Confirmations rbmq.PublisherConfirmation
+	Message       eventMessage
+}
+
+func awaitPublishConfirmation(ctx context.Context, params awaitPublishConfirmationParams) error {
+	confirmations, message := params.Confirmations, params.Message
 	if len(confirmations) != 1 || confirmations[0] == nil {
 		return ErrConfirmUnavailable{Label: message.label}
 	}

@@ -8,7 +8,6 @@ import (
 )
 
 const findUploadFailedText = "failed finding the upload"
-const uploadNotFoundText = "expected an upload owned by the user"
 const uploadPurposeUnknownText = "expected one of the known upload purposes"
 const uploadFilesMissingText = "expected at least one file"
 const tooManyUploadFilesText = "expected no more files than the upload purpose accepts per request"
@@ -23,7 +22,10 @@ const storedFileNotFoundText = "stored file not found"
 const deleteStoredFileFailedText = "failed deleting the stored file"
 const saveUploadFailedText = "failed saving the upload"
 const listPendingUploadsFailedText = "failed listing the pending uploads"
+const listOrphanedUploadsFailedText = "failed listing the orphaned uploads"
 const deleteUploadFailedText = "failed deleting the upload"
+const uploadNotFoundText = "expected an upload owned by the user with the required purpose"
+const attachUploadFailedText = "failed attaching the upload"
 
 // DiscardStoredFileFailedText is logged when a file stored for a failed upload could not be removed.
 const DiscardStoredFileFailedText = "failed discarding a file stored for a failed upload"
@@ -193,6 +195,19 @@ func (e ErrListPendingUploadsFailed) Unwrap() error {
 	return e.Cause
 }
 
+// ErrListOrphanedUploadsFailed reports an orphaned upload lookup the database could not complete.
+type ErrListOrphanedUploadsFailed struct {
+	Cause error
+}
+
+func (e ErrListOrphanedUploadsFailed) Error() string {
+	return fmt.Sprintf("%s: %s", listOrphanedUploadsFailedText, e.Cause)
+}
+
+func (e ErrListOrphanedUploadsFailed) Unwrap() error {
+	return e.Cause
+}
+
 // ErrDeleteUploadFailed reports an upload row the database failed to delete.
 type ErrDeleteUploadFailed struct {
 	ID    uuid.UUID
@@ -207,13 +222,27 @@ func (e ErrDeleteUploadFailed) Unwrap() error {
 	return e.Cause
 }
 
-// ErrUploadNotFound reports an upload that is missing or owned by someone else.
+// ErrUploadNotFound reports an upload that is missing, owned by someone else, or meant for another purpose.
 type ErrUploadNotFound struct {
 	ID uuid.UUID
 }
 
 func (e ErrUploadNotFound) Error() string {
 	return fmt.Sprintf("%s, got %s", uploadNotFoundText, e.ID)
+}
+
+// ErrAttachUploadFailed reports an upload row the database failed to mark attached.
+type ErrAttachUploadFailed struct {
+	ID    uuid.UUID
+	Cause error
+}
+
+func (e ErrAttachUploadFailed) Error() string {
+	return fmt.Sprintf("%s %s: %s", attachUploadFailedText, e.ID, e.Cause)
+}
+
+func (e ErrAttachUploadFailed) Unwrap() error {
+	return e.Cause
 }
 
 // ErrFindUploadFailed reports an upload lookup the database could not complete.

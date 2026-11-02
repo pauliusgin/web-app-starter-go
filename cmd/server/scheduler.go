@@ -27,6 +27,11 @@ const pendingUploadCleanupMessage = "stale pending uploads purged"
 
 const pendingUploadCleanupTimeout = 10 * time.Minute
 
+const orphanedUploadCleanupJobName = "orphaned_upload_cleanup"
+const orphanedUploadCleanupMessage = "orphaned attached uploads purged"
+
+const orphanedUploadCleanupTimeout = 10 * time.Minute
+
 type buildSchedulerParams struct {
 	Database       *sql.DB
 	Logger         *slog.Logger
@@ -52,6 +57,7 @@ func backgroundJobs(params buildSchedulerParams) []scheduler.Job {
 	return []scheduler.Job{
 		refreshTokenCleanupJob(params),
 		pendingUploadCleanupJob(params),
+		orphanedUploadCleanupJob(params),
 	}
 }
 
@@ -105,6 +111,34 @@ func pendingUploadCleanupJob(params buildSchedulerParams) scheduler.Job {
 		Schedule: scheduler.DailyAtMidnight,
 		Timeout:  pendingUploadCleanupTimeout,
 		Run:      deleteStalePendingUploads,
+	}
+}
+
+func orphanedUploadCleanupJob(params buildSchedulerParams) scheduler.Job {
+	queries := sqlc.New(params.Database)
+	cleanupDependencies := uploadusecases.DeleteOrphanedAttachedUploadsDependencies{
+		UploadWriteRepository: uploadsrepo.NewUploadWriteRepository(queries),
+		FileStorage:           params.FileStorage,
+		EventDispatcher: buildEventDispatcher(buildEventDispatcherParams{
+			Queries:   queries,
+			Publisher: params.EventPublisher.PublishEvent,
+		}),
+	}
+
+	deleteOrphanedAttachedUploads := func(ctx context.Context) error {
+		result, err := uploadusecases.DeleteOrphanedAttachedUploads(ctx, cleanupDependencies)
+
+		params.Logger.Info(orphanedUploadCleanupMessage,
+			"job", orphanedUploadCleanupJobName, "deleted", result.DeletedCount)
+
+		return err
+	}
+
+	return scheduler.Job{
+		Name:     orphanedUploadCleanupJobName,
+		Schedule: scheduler.DailyAtMidnight,
+		Timeout:  orphanedUploadCleanupTimeout,
+		Run:      deleteOrphanedAttachedUploads,
 	}
 }
 

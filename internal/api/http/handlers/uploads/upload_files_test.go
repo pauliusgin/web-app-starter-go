@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -72,12 +73,14 @@ func (h uploadFilesHarness) handler() http.Handler {
 		AppEnv:                "test",
 	}
 
+	readDependencies := queries.GetUploadsByIDsDependencies{UploadReadRepository: h.repository}
+
 	return UploadFiles(UploadFilesDependencies{
 		UploadFiles: func(ctx context.Context, params usecases.UploadFilesParams) (usecases.UploadFilesResult, error) {
 			return usecases.UploadFiles(ctx, dependencies, params)
 		},
 		GetUploadsByIDs: func(ctx context.Context, params queries.GetUploadsByIDsParams) (queries.GetUploadsByIDsResult, error) {
-			return queries.GetUploadsByIDs(ctx, queries.GetUploadsByIDsDependencies{UploadReadRepository: h.repository}, params)
+			return queries.GetUploadsByIDs(ctx, readDependencies, params)
 		},
 	})
 }
@@ -155,15 +158,25 @@ func (h uploadFilesHarness) postFiles(t *testing.T, purpose string, files ...for
 	return h.post(t, postUploadFilesParams{body: body, contentType: contentType})
 }
 
-func decodeUploadFilesResponse(t *testing.T, response *http.Response) uploadFilesResponse {
+// decodeUploadedFiles returns the "uploads" array of the body, each upload as the raw JSON object.
+func decodeUploadedFiles(t *testing.T, response *http.Response) []map[string]any {
 	t.Helper()
 
-	decoded := uploadFilesResponse{}
-	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+	body := map[string]any{}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decoding the response body: %v", err)
 	}
+	if len(body) != 1 {
+		t.Fatalf("body = %v, want exactly the key uploads", body)
+	}
+	rawUploads, _ := body["uploads"].([]any)
+	uploads := make([]map[string]any, 0, len(rawUploads))
+	for _, rawUpload := range rawUploads {
+		upload, _ := rawUpload.(map[string]any)
+		uploads = append(uploads, upload)
+	}
 
-	return decoded
+	return uploads
 }
 
 func assertErrorResponse(t *testing.T, response *http.Response, wantStatus int, wantCode handlers.ErrorCode) {
@@ -173,58 +186,56 @@ func assertErrorResponse(t *testing.T, response *http.Response, wantStatus int, 
 		t.Errorf("status = %d, want %d", response.StatusCode, wantStatus)
 	}
 
-	decoded := handlers.ErrorResponse{}
-	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+	body := map[string]any{}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decoding the error body: %v", err)
 	}
-	if decoded.Code != wantCode {
-		t.Errorf("code = %q, want %q (message %q)", decoded.Code, wantCode, decoded.Message)
+	if body["code"] != string(wantCode) {
+		t.Errorf("code = %v, want %q (message %v)", body["code"], wantCode, body["message"])
+	}
+	if details, present := body["details"]; !present || details != nil {
+		t.Errorf("details = %v (present %t), want an explicit null", details, present)
 	}
 }
 
 func TestUploadFilesAnswersCreatedWithBothURLsOfAnImage(t *testing.T) {
 	harness := newUploadFilesHarness(t)
 
-	response := harness.postFiles(t, "profile_picture", formFile{name: "me.jpg", content: jpegContent})
+	response := harness.postFiles(t, "document_attachment", formFile{name: "scan.jpg", content: jpegContent})
 
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusCreated)
 	}
 
-	decoded := decodeUploadFilesResponse(t, response)
-	if len(decoded.Uploads) != 1 || len(harness.repository.Uploads) != 1 {
-		t.Fatalf("answered %d uploads, saved %d, want 1 each", len(decoded.Uploads), len(harness.repository.Uploads))
+	answered := decodeUploadedFiles(t, response)
+	if len(answered) != 1 || len(harness.repository.Uploads) != 1 {
+		t.Fatalf("answered %d uploads, saved %d, want 1 each", len(answered), len(harness.repository.Uploads))
 	}
 
 	saved := harness.repository.Uploads[0]
-	answered := decoded.Uploads[0]
-	if answered.PreviewURL == nil || *answered.PreviewURL != saved.PreviewURL || saved.PreviewURL == "" {
-		t.Errorf("previewUrl = %v, want the saved preview URL %q", answered.PreviewURL, saved.PreviewURL)
+	want := map[string]any{
+		"id":          saved.ID.String(),
+		"purpose":     "document_attachment",
+		"kind":        "image",
+		"mimeType":    "image/jpeg",
+		"originalUrl": saved.OriginalURL,
+		"previewUrl":  saved.PreviewURL,
 	}
-
-	answered.PreviewURL = nil
-	want := uploadedFileResponse{
-		ID:          saved.ID,
-		Purpose:     "profile_picture",
-		Kind:        "image",
-		MimeType:    "image/jpeg",
-		OriginalURL: saved.OriginalURL,
-	}
-	if answered != want {
-		t.Errorf("upload = %+v, want %+v", answered, want)
+	if !reflect.DeepEqual(answered[0], want) {
+		t.Errorf("upload = %v, want %v", answered[0], want)
 	}
 	if saved.UserID != uploadingUserID {
 		t.Errorf("owner = %s, want the authenticated user %s", saved.UserID, uploadingUserID)
 	}
-	if want.OriginalURL == "" {
-		t.Error("originalUrl is empty, want it set")
+	if saved.OriginalURL == "" || saved.PreviewURL == "" {
+		t.Errorf("urls = %q %q, want both set", saved.OriginalURL, saved.PreviewURL)
 	}
 }
 
 func TestUploadFilesAnswersANullPreviewURLForADocument(t *testing.T) {
 	harness := newUploadFilesHarness(t)
 
-	response := harness.postFiles(t, "document_attachment", formFile{name: "document.pdf", content: pdfContent})
+	response := harness.postFiles(t, "document_attachment", formFile{name: "contract.pdf", content: pdfContent})
 
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusCreated)
@@ -234,9 +245,26 @@ func TestUploadFilesAnswersANullPreviewURLForADocument(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		t.Fatalf("decoding the response body: %v", err)
 	}
-	previewURL, present := raw["uploads"][0]["previewUrl"]
-	if !present || previewURL != nil {
-		t.Errorf("upload = %v, want previewUrl present as null for a document", raw["uploads"][0])
+	if previewURL, present := raw["uploads"][0]["previewUrl"]; !present || previewURL != nil {
+		t.Errorf("upload = %v, want previewUrl null for a document", raw["uploads"][0])
+	}
+}
+
+func TestUploadFilesAnswersANullOriginalURLForAPreviewOnlyImage(t *testing.T) {
+	harness := newUploadFilesHarness(t)
+
+	response := harness.postFiles(t, "profile_picture", formFile{name: "picture.jpg", content: jpegContent})
+
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusCreated)
+	}
+
+	raw := map[string][]map[string]any{}
+	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
+		t.Fatalf("decoding the response body: %v", err)
+	}
+	if originalURL, present := raw["uploads"][0]["originalUrl"]; !present || originalURL != nil {
+		t.Errorf("upload = %v, want originalUrl null for a preview-only image", raw["uploads"][0])
 	}
 }
 

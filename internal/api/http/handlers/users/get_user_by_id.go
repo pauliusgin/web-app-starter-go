@@ -16,13 +16,14 @@ import (
 )
 
 type getUserByIDResponse struct {
-	ID              uuid.UUID  `json:"id"`
-	Email           string     `json:"email"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	EmailVerifiedAt *time.Time `json:"emailVerifiedAt"`
-	SigninAt        *time.Time `json:"signinAt"`
-	FirstName       *string    `json:"firstName"`
-	LastName        *string    `json:"lastName"`
+	ID              uuid.UUID             `json:"id"`
+	Email           string                `json:"email"`
+	CreatedAt       time.Time             `json:"createdAt"`
+	EmailVerifiedAt *time.Time            `json:"emailVerifiedAt"`
+	SigninAt        *time.Time            `json:"signinAt"`
+	FirstName       *string               `json:"firstName"`
+	LastName        *string               `json:"lastName"`
+	SignInMethods   []models.SignInMethod `json:"signInMethods"`
 }
 
 // GetUserByIDUseCase is the read-side lookup the current-user handler depends on.
@@ -64,6 +65,7 @@ func buildGetUserByIDResponse(user models.UserReadModel) getUserByIDResponse {
 		SigninAt:        user.SigninAt,
 		FirstName:       user.FirstName,
 		LastName:        user.LastName,
+		SignInMethods:   user.SignInMethods,
 	}
 }
 

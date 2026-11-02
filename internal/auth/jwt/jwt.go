@@ -14,7 +14,10 @@ const AccessTokenLifetime = time.Hour
 
 // AccessTokenIssuer is the issuing and parsing port the API layer depends on.
 type AccessTokenIssuer interface {
+	// IssueAccessToken returns a signed access token carrying the user's id and email.
 	IssueAccessToken(params IssueAccessTokenParams) (string, error)
+
+	// ParseAccessToken verifies an access token and returns its claims, or why it was rejected.
 	ParseAccessToken(accessToken string) (AccessTokenClaims, error)
 }
 

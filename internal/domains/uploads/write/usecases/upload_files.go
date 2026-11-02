@@ -34,7 +34,7 @@ type UploadFilesResult struct {
 	Uploads []models.Upload
 }
 
-// UploadFilesDependencies carries the collaborators storing and recording uploads needs.
+// UploadFilesDependencies carries the upload store, file storage, image processor, dispatcher and app env.
 type UploadFilesDependencies struct {
 	UploadWriteRepository repositories.UploadWriteRepository
 	FileStorage           storage.FileStorage
@@ -78,7 +78,7 @@ func UploadFiles(
 			UploadID: uuid.New(),
 			UserID:   params.UserID,
 			Purpose:  params.Purpose,
-			Preview:  rules.Preview,
+			Rules:    rules,
 			File:     file,
 		})
 		if err != nil {
@@ -172,7 +172,7 @@ func validateIncomingFile(ctx context.Context, params validateIncomingFileParams
 		return validated, nil
 	}
 
-	image, err := inspectUploadedImage(ctx, params.ImageProcessor, file)
+	image, err := inspectUploadedImage(ctx, inspectUploadedImageParams{ImageProcessor: params.ImageProcessor, File: file})
 	if err != nil {
 		return validatedFile{}, err
 	}
@@ -181,19 +181,20 @@ func validateIncomingFile(ctx context.Context, params validateIncomingFileParams
 	return validated, nil
 }
 
-func inspectUploadedImage(
-	ctx context.Context,
-	imageProcessor imaging.ImageProcessor,
-	file IncomingFile,
-) (imaging.ImageInfo, error) {
-	image, err := imageProcessor.InspectImage(ctx, file.Content)
+type inspectUploadedImageParams struct {
+	ImageProcessor imaging.ImageProcessor
+	File           IncomingFile
+}
+
+func inspectUploadedImage(ctx context.Context, params inspectUploadedImageParams) (imaging.ImageInfo, error) {
+	image, err := params.ImageProcessor.InspectImage(ctx, params.File.Content)
 	if err != nil {
-		return imaging.ImageInfo{}, e.ErrImageUnreadable{FileName: file.Name, Cause: err}
+		return imaging.ImageInfo{}, e.ErrImageUnreadable{FileName: params.File.Name, Cause: err}
 	}
 
 	if image.Width > models.MaxImageEdgePixels || image.Height > models.MaxImageEdgePixels {
 		return imaging.ImageInfo{}, e.ErrImageDimensionsTooLarge{
-			FileName:      file.Name,
+			FileName:      params.File.Name,
 			Width:         image.Width,
 			Height:        image.Height,
 			MaxEdgePixels: models.MaxImageEdgePixels,
@@ -207,7 +208,7 @@ type storeUploadParams struct {
 	UploadID uuid.UUID
 	UserID   uuid.UUID
 	Purpose  models.Purpose
-	Preview  models.PreviewSpec
+	Rules    models.PurposeRules
 	File     validatedFile
 }
 
@@ -216,13 +217,13 @@ type storeUploadParams struct {
 func storeUpload(ctx context.Context, d UploadFilesDependencies, params storeUploadParams) (models.Upload, error) {
 	newUpload, storedPaths, err := storeUploadFiles(ctx, d, params)
 	if err != nil {
-		discardStoredFiles(ctx, d.FileStorage, storedPaths)
+		discardStoredFiles(ctx, discardStoredFilesParams{FileStorage: d.FileStorage, Paths: storedPaths})
 		return models.Upload{}, err
 	}
 
 	saved, err := d.UploadWriteRepository.SaveUpload(ctx, newUpload)
 	if err != nil {
-		discardStoredFiles(ctx, d.FileStorage, storedPaths)
+		discardStoredFiles(ctx, discardStoredFilesParams{FileStorage: d.FileStorage, Paths: storedPaths})
 		return models.Upload{}, err
 	}
 
@@ -243,6 +244,7 @@ func storeUploadFiles(
 	params storeUploadParams,
 ) (models.NewUpload, []string, error) {
 	file := params.File
+	keepsOriginal := params.Rules.KeepsOriginal(file.Format.Kind)
 	paths := models.BuildStoragePaths(models.StoragePathsParams{
 		AppEnv:    d.AppEnv,
 		UserID:    params.UserID,
@@ -251,28 +253,32 @@ func storeUploadFiles(
 		Extension: file.Format.Extension,
 	})
 
-	original, err := storeFileAt(ctx, d.FileStorage, storage.StoreFileParams{
-		Path:        paths.Original,
-		ContentType: file.Format.MimeType,
-		Content:     file.Content,
-	})
-	if err != nil {
-		return models.NewUpload{}, nil, err
-	}
-
 	newUpload := models.NewUpload{
-		ID:           params.UploadID,
-		UserID:       params.UserID,
-		Purpose:      params.Purpose,
-		Kind:         file.Format.Kind,
-		MimeType:     file.Format.MimeType,
-		SizeBytes:    int64(len(file.Content)),
-		Width:        file.Image.Width,
-		Height:       file.Image.Height,
-		OriginalPath: paths.Original,
-		OriginalURL:  original.URL,
+		ID:        params.UploadID,
+		UserID:    params.UserID,
+		Purpose:   params.Purpose,
+		Kind:      file.Format.Kind,
+		MimeType:  file.Format.MimeType,
+		SizeBytes: int64(len(file.Content)),
+		Width:     file.Image.Width,
+		Height:    file.Image.Height,
 	}
-	storedPaths := []string{paths.Original}
+	storedPaths := make([]string, 0, 2)
+
+	if keepsOriginal {
+		original, err := storeFileAt(ctx, d.FileStorage, storage.StoreFileParams{
+			Path:        paths.Original,
+			ContentType: file.Format.MimeType,
+			Content:     file.Content,
+		})
+		if err != nil {
+			return models.NewUpload{}, storedPaths, err
+		}
+
+		newUpload.OriginalPath = paths.Original
+		newUpload.OriginalURL = original.URL
+		storedPaths = append(storedPaths, paths.Original)
+	}
 
 	if file.Format.Kind != models.KindImage {
 		return newUpload, storedPaths, nil
@@ -280,7 +286,7 @@ func storeUploadFiles(
 
 	preview, err := storeImagePreview(ctx, d, storeImagePreviewParams{
 		Path:    paths.Preview,
-		Preview: params.Preview,
+		Preview: params.Rules.Preview,
 		File:    file,
 	})
 	if err != nil {
@@ -289,8 +295,23 @@ func storeUploadFiles(
 
 	newUpload.PreviewPath = paths.Preview
 	newUpload.PreviewURL = preview.URL
+	storedPaths = append(storedPaths, paths.Preview)
 
-	return newUpload, append(storedPaths, paths.Preview), nil
+	if keepsOriginal {
+		return newUpload, storedPaths, nil
+	}
+
+	described, err := describePreviewAsStoredFile(ctx, describePreviewAsStoredFileParams{
+		ImageProcessor: d.ImageProcessor,
+		NewUpload:      newUpload,
+		FileName:       file.Name,
+		PreviewContent: preview.Content,
+	})
+	if err != nil {
+		return models.NewUpload{}, storedPaths, err
+	}
+
+	return described, storedPaths, nil
 }
 
 type storeImagePreviewParams struct {
@@ -299,25 +320,62 @@ type storeImagePreviewParams struct {
 	File    validatedFile
 }
 
+type storedImagePreview struct {
+	URL     string
+	Content []byte
+}
+
 func storeImagePreview(
 	ctx context.Context,
 	d UploadFilesDependencies,
 	params storeImagePreviewParams,
-) (storage.StoredFile, error) {
+) (storedImagePreview, error) {
 	previewContent, err := d.ImageProcessor.CreatePreview(ctx, imaging.CreatePreviewParams{
 		Content:    params.File.Content,
 		EdgePixels: params.Preview.EdgePixels,
 		Crop:       params.Preview.Crop,
 	})
 	if err != nil {
-		return storage.StoredFile{}, e.ErrCreatePreviewFailed{FileName: params.File.Name, Cause: err}
+		return storedImagePreview{}, e.ErrCreatePreviewFailed{FileName: params.File.Name, Cause: err}
 	}
 
-	return storeFileAt(ctx, d.FileStorage, storage.StoreFileParams{
+	stored, err := storeFileAt(ctx, d.FileStorage, storage.StoreFileParams{
 		Path:        params.Path,
 		ContentType: models.PreviewMimeType,
 		Content:     previewContent,
 	})
+	if err != nil {
+		return storedImagePreview{}, err
+	}
+
+	return storedImagePreview{URL: stored.URL, Content: previewContent}, nil
+}
+
+type describePreviewAsStoredFileParams struct {
+	ImageProcessor imaging.ImageProcessor
+	NewUpload      models.NewUpload
+	FileName       string
+	PreviewContent []byte
+}
+
+// describePreviewAsStoredFile makes a preview-only upload's row describe the preview, since the
+// uploads row records what is stored and the original is gone.
+func describePreviewAsStoredFile(
+	ctx context.Context,
+	params describePreviewAsStoredFileParams,
+) (models.NewUpload, error) {
+	image, err := params.ImageProcessor.InspectImage(ctx, params.PreviewContent)
+	if err != nil {
+		return models.NewUpload{}, e.ErrCreatePreviewFailed{FileName: params.FileName, Cause: err}
+	}
+
+	described := params.NewUpload
+	described.MimeType = models.PreviewMimeType
+	described.SizeBytes = int64(len(params.PreviewContent))
+	described.Width = image.Width
+	described.Height = image.Height
+
+	return described, nil
 }
 
 func storeFileAt(
@@ -334,9 +392,14 @@ func storeFileAt(
 }
 
 // discardStoredFiles is best effort: a file it cannot remove is logged and left orphaned in storage.
-func discardStoredFiles(ctx context.Context, fileStorage storage.FileStorage, paths []string) {
-	for _, path := range paths {
-		if err := fileStorage.DeleteFile(ctx, path); err != nil {
+type discardStoredFilesParams struct {
+	FileStorage storage.FileStorage
+	Paths       []string
+}
+
+func discardStoredFiles(ctx context.Context, params discardStoredFilesParams) {
+	for _, path := range params.Paths {
+		if err := params.FileStorage.DeleteFile(ctx, path); err != nil {
 			slog.Error(e.DiscardStoredFileFailedText, "path", path, "error", err)
 		}
 	}

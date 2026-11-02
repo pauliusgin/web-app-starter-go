@@ -8,31 +8,38 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
+	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/messages"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/profiles"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/tokens"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/uploads"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers/users"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
-	jwt "github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
+	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/refreshtoken"
 	profilereadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
 	profilequeries "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
 	profilemodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/models"
 	profileusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
+	uploadreadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/models"
 	uploadqueries "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/read/queries"
 	uploadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
 	uploadusecases "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
 	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
 	userqueries "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/queries"
-	models "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
+	usermodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/usecases"
 )
 
 const signupPath = "/api/v1/users/signup"
 const signinPath = "/api/v1/users/signin"
+const googleSignupPath = "/api/v1/users/google-signup"
+const googleSigninPath = "/api/v1/users/google-signin"
+const googleSignInConfigPath = "/api/v1/users/google-config"
 const refreshTokenPath = "/api/v1/tokens/refresh"
 const revokeTokenPath = "/api/v1/tokens/revoke"
 
@@ -46,11 +53,19 @@ const changePasswordPath = "/api/v1/users/change-password"
 
 const changePasswordBody = `{"currentPassword":"correct-horse","newPassword":"new-ledger-password"}`
 
+const addPasswordPath = "/api/v1/users/add-password"
+
+const addPasswordBody = `{"password":"new-ledger-password"}`
+
+const addGoogleAccountPath = "/api/v1/users/add-google"
+
+const addGoogleAccountBody = `{"idToken":"google-id-token"}`
+
 const currentUserPath = "/api/v1/users/me"
 
 const bearerCredential = "Bearer header.payload.signature"
 
-const presentedRefreshToken = "Zx7cV2bN5mQ8wE1rT4yU7iO0pA3sD6fG9hJ2kL5zX8c"
+const refreshTokenCredential = "Xh2q8kU1n0dJ6oQpZ4tR7yC3vB5mN9wL1aS8dF0gH2k"
 
 const uploadFilesPath = "/api/v1/uploads"
 
@@ -66,7 +81,19 @@ const profilesPath = "/api/v1/profiles"
 
 const profileBody = `{"firstName":"Ada","lastName":"Lovelace"}`
 
+const verificationEmailPath = "/api/v1/messages/verification-email"
+
+const passwordResetEmailPath = "/api/v1/messages/password-reset-email"
+
+const passwordResetEmailBody = `{"email":"accountant@example.com"}`
+
+const resetPasswordPath = "/api/v1/users/reset-password"
+
+const resetPasswordBody = `{"token":"Rt4pW8kL1zX6cV9bN2mQ5sD7fG0hJ3aE","newPassword":"reset-ledger-password"}`
+
 const signupBody = `{"email":"accountant@example.com","password":"correct-horse"}`
+
+const googleIDTokenBody = `{"idToken":"header.payload.signature"}`
 
 var routedUserID = uuid.MustParse("6f1c9f2e-4a1b-4c3d-9e8f-0a1b2c3d4e5f")
 
@@ -117,19 +144,8 @@ func (fakeAccessTokens) ParseAccessToken(string) (jwt.AccessTokenClaims, error) 
 	return jwt.AccessTokenClaims{UserID: routedUserID}, nil
 }
 
-func findRoutedUserByID(_ context.Context, id uuid.UUID) (models.User, error) {
-	return models.User{ID: id, Email: "accountant@example.com"}, nil
-}
-
-func getRoutedUserReadModel(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
-	return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
-}
-
-func getRoutedProfile(
-	_ context.Context,
-	params profilequeries.GetProfileByIDParams,
-) (profilequeries.GetProfileByIDResult, error) {
-	return profilequeries.GetProfileByIDResult{Profile: profilereadmodels.ProfileReadModel{ID: params.UserID}}, nil
+func findRoutedUserByID(_ context.Context, id uuid.UUID) (usermodels.User, error) {
+	return usermodels.User{ID: id, Email: "accountant@example.com"}, nil
 }
 
 func routerWithEveryRouteWired() http.Handler {
@@ -137,9 +153,11 @@ func routerWithEveryRouteWired() http.Handler {
 		Users: UserRoutesDependencies{
 			SignUpUser: users.SignUpUserDependencies{
 				SignUpUser: func(_ context.Context, params usecases.SignUpUserParams) (usecases.SignUpUserResult, error) {
-					return usecases.SignUpUserResult{User: models.User{ID: routedUserID, Email: params.Email}}, nil
+					return usecases.SignUpUserResult{User: usermodels.User{ID: routedUserID, Email: params.Email}}, nil
 				},
-				GetUserReadModelByID: getRoutedUserReadModel,
+				GetUserReadModelByID: func(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
+					return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
+				},
 				IssueRefreshToken: func(context.Context, refreshtoken.IssueParams) (refreshtoken.IssueResult, error) {
 					return refreshtoken.IssueResult{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
 				},
@@ -147,21 +165,57 @@ func routerWithEveryRouteWired() http.Handler {
 			},
 			SignInUser: users.SignInUserDependencies{
 				SignInUser: func(_ context.Context, params usecases.SignInUserParams) (usecases.SignInUserResult, error) {
-					return usecases.SignInUserResult{User: models.User{ID: routedUserID, Email: params.Email}}, nil
+					return usecases.SignInUserResult{User: usermodels.User{ID: routedUserID, Email: params.Email}}, nil
 				},
-				GetUserReadModelByID: getRoutedUserReadModel,
+				GetUserReadModelByID: func(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
+					return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
+				},
 				IssueRefreshToken: func(context.Context, refreshtoken.IssueParams) (refreshtoken.IssueResult, error) {
 					return refreshtoken.IssueResult{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
 				},
 				Jwt: fakeAccessTokens{},
+			},
+			SignUpUserGoogle: users.SignUpUserGoogleDependencies{
+				SignUpUserGoogle: func(
+					context.Context,
+					usecases.SignUpUserGoogleParams,
+				) (usecases.SignUpUserGoogleResult, error) {
+					return usecases.SignUpUserGoogleResult{User: usermodels.User{ID: routedUserID, Email: "accountant@example.com"}}, nil
+				},
+				GetUserReadModelByID: func(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
+					return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
+				},
+				IssueRefreshToken: func(context.Context, refreshtoken.IssueParams) (refreshtoken.IssueResult, error) {
+					return refreshtoken.IssueResult{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
+				},
+				Jwt: fakeAccessTokens{},
+			},
+			SignInUserGoogle: users.SignInUserGoogleDependencies{
+				SignInUserGoogle: func(
+					context.Context,
+					usecases.SignInUserGoogleParams,
+				) (usecases.SignInUserGoogleResult, error) {
+					return usecases.SignInUserGoogleResult{User: usermodels.User{ID: routedUserID, Email: "accountant@example.com"}}, nil
+				},
+				GetUserReadModelByID: func(_ context.Context, id uuid.UUID) (readmodels.UserReadModel, error) {
+					return readmodels.UserReadModel{ID: id, Email: "accountant@example.com"}, nil
+				},
+				IssueRefreshToken: func(context.Context, refreshtoken.IssueParams) (refreshtoken.IssueResult, error) {
+					return refreshtoken.IssueResult{Plaintext: "Qw9eR2tY5uI8oP1aS4dF7gH0jK3lZ6xC9vB2nM5qW8e"}, nil
+				},
+				Jwt: fakeAccessTokens{},
+			},
+			GetGoogleSignInConfig: users.GetGoogleSignInConfigDependencies{
+				GetGoogleSignInConfig: func(context.Context) (userqueries.GetGoogleSignInConfigResult, error) {
+					return userqueries.GetGoogleSignInConfigResult{ClientID: "routed-client-id"}, nil
+				},
 			},
 			VerifyEmail: users.VerifyEmailDependencies{
 				VerifyEmail: func(context.Context, usecases.VerifyEmailParams) error { return nil },
 			},
 			GetUserByID: users.GetUserByIDDependencies{
 				GetUserByID: func(_ context.Context, params userqueries.GetUserByIDParams) (userqueries.GetUserByIDResult, error) {
-					user, err := getRoutedUserReadModel(context.Background(), params.UserID)
-					return userqueries.GetUserByIDResult{User: user}, err
+					return userqueries.GetUserByIDResult{User: readmodels.UserReadModel{ID: params.UserID}}, nil
 				},
 			},
 			DeleteUser: users.DeleteUserDependencies{
@@ -172,6 +226,15 @@ func routerWithEveryRouteWired() http.Handler {
 			},
 			ChangePassword: users.ChangePasswordDependencies{
 				ChangePassword: func(context.Context, usecases.ChangePasswordParams) error { return nil },
+			},
+			ResetPassword: users.ResetPasswordDependencies{
+				ResetPassword: func(context.Context, usecases.ResetPasswordParams) error { return nil },
+			},
+			AddPassword: users.AddPasswordDependencies{
+				AddPassword: func(context.Context, usecases.AddPasswordParams) error { return nil },
+			},
+			AddGoogleAccount: users.AddGoogleAccountDependencies{
+				AddGoogleAccount: func(context.Context, usecases.AddGoogleAccountParams) error { return nil },
 			},
 			RequireAuthenticatedUser: middleware.RequireAuthenticatedUserDependencies{
 				ParseAccessToken: fakeAccessTokens{}.ParseAccessToken,
@@ -196,7 +259,7 @@ func routerWithEveryRouteWired() http.Handler {
 					return uploadusecases.UploadFilesResult{Uploads: []uploadmodels.Upload{{ID: routedUserID}}}, nil
 				},
 				GetUploadsByIDs: func(context.Context, uploadqueries.GetUploadsByIDsParams) (uploadqueries.GetUploadsByIDsResult, error) {
-					return uploadqueries.GetUploadsByIDsResult{}, nil
+					return uploadqueries.GetUploadsByIDsResult{Uploads: []uploadreadmodels.UploadReadModel{{ID: routedUserID}}}, nil
 				},
 			},
 			RequireAuthenticatedUser: middleware.RequireAuthenticatedUserDependencies{
@@ -209,13 +272,30 @@ func routerWithEveryRouteWired() http.Handler {
 				CreateProfile: func(context.Context, profileusecases.CreateProfileParams) (profileusecases.CreateProfileResult, error) {
 					return profileusecases.CreateProfileResult{Profile: profilemodels.Profile{ID: routedUserID}}, nil
 				},
-				GetProfileByID: getRoutedProfile,
+				GetProfileByID: func(context.Context, profilequeries.GetProfileByIDParams) (profilequeries.GetProfileByIDResult, error) {
+					return profilequeries.GetProfileByIDResult{Profile: profilereadmodels.ProfileReadModel{ID: routedUserID}}, nil
+				},
 			},
 			UpdateProfile: profiles.UpdateProfileDependencies{
 				UpdateProfile: func(context.Context, profileusecases.UpdateProfileParams) (profileusecases.UpdateProfileResult, error) {
 					return profileusecases.UpdateProfileResult{Profile: profilemodels.Profile{ID: routedUserID}}, nil
 				},
-				GetProfileByID: getRoutedProfile,
+				GetProfileByID: func(context.Context, profilequeries.GetProfileByIDParams) (profilequeries.GetProfileByIDResult, error) {
+					return profilequeries.GetProfileByIDResult{Profile: profilereadmodels.ProfileReadModel{ID: routedUserID}}, nil
+				},
+			},
+			RequireAuthenticatedUser: middleware.RequireAuthenticatedUserDependencies{
+				ParseAccessToken: fakeAccessTokens{}.ParseAccessToken,
+				FindUserByID:     findRoutedUserByID,
+			},
+		},
+		Messages: MessageRoutesDependencies{
+			SendPasswordResetEmail: messages.SendPasswordResetEmailDependencies{
+				RequestPasswordReset: func(context.Context, usecases.RequestPasswordResetParams) error { return nil },
+				Clock:                handlers.ResponseClock{Now: time.Now, Wait: func(context.Context, time.Duration) {}},
+			},
+			ResendEmailVerification: messages.ResendEmailVerificationDependencies{
+				ResendEmailVerification: func(context.Context, usecases.ResendEmailVerificationParams) error { return nil },
 			},
 			RequireAuthenticatedUser: middleware.RequireAuthenticatedUserDependencies{
 				ParseAccessToken: fakeAccessTokens{}.ParseAccessToken,
@@ -244,6 +324,12 @@ func TestBuildRouterReachesEveryRoute(t *testing.T) {
 			wantStatus: http.StatusCreated},
 		{name: "signin", request: routeRequest{method: http.MethodPost, path: signinPath, body: signupBody},
 			wantStatus: http.StatusOK},
+		{name: "google signup", request: routeRequest{method: http.MethodPost, path: googleSignupPath, body: googleIDTokenBody},
+			wantStatus: http.StatusCreated},
+		{name: "google signin", request: routeRequest{method: http.MethodPost, path: googleSigninPath, body: googleIDTokenBody},
+			wantStatus: http.StatusOK},
+		{name: "google sign-in config", request: routeRequest{method: http.MethodGet, path: googleSignInConfigPath},
+			wantStatus: http.StatusOK},
 		{name: "verify email", request: routeRequest{method: http.MethodPost, path: verifyEmailPath,
 			authorization: bearerCredential}, wantStatus: http.StatusOK},
 		{name: "get current user", request: routeRequest{method: http.MethodGet, path: currentUserPath,
@@ -254,10 +340,14 @@ func TestBuildRouterReachesEveryRoute(t *testing.T) {
 			body: requestEmailChangeBody, authorization: bearerCredential}, wantStatus: http.StatusAccepted},
 		{name: "change password", request: routeRequest{method: http.MethodPost, path: changePasswordPath,
 			body: changePasswordBody, authorization: bearerCredential}, wantStatus: http.StatusOK},
+		{name: "add password", request: routeRequest{method: http.MethodPost, path: addPasswordPath,
+			body: addPasswordBody, authorization: bearerCredential}, wantStatus: http.StatusOK},
+		{name: "add google account", request: routeRequest{method: http.MethodPost, path: addGoogleAccountPath,
+			body: addGoogleAccountBody, authorization: bearerCredential}, wantStatus: http.StatusOK},
 		{name: "token refresh", request: routeRequest{method: http.MethodPost, path: refreshTokenPath,
-			refreshToken: presentedRefreshToken}, wantStatus: http.StatusOK},
+			refreshToken: refreshTokenCredential}, wantStatus: http.StatusOK},
 		{name: "token revoke", request: routeRequest{method: http.MethodPost, path: revokeTokenPath,
-			refreshToken: presentedRefreshToken}, wantStatus: http.StatusOK},
+			refreshToken: refreshTokenCredential}, wantStatus: http.StatusOK},
 		{name: "upload files", request: routeRequest{method: http.MethodPost, path: uploadFilesPath,
 			body: uploadFilesBody, contentType: uploadContentType, authorization: bearerCredential},
 			wantStatus: http.StatusCreated},
@@ -265,6 +355,12 @@ func TestBuildRouterReachesEveryRoute(t *testing.T) {
 			body: profileBody, authorization: bearerCredential}, wantStatus: http.StatusCreated},
 		{name: "update profile", request: routeRequest{method: http.MethodPut, path: profilesPath,
 			body: profileBody, authorization: bearerCredential}, wantStatus: http.StatusOK},
+		{name: "resend verification email", request: routeRequest{method: http.MethodPost,
+			path: verificationEmailPath, authorization: bearerCredential}, wantStatus: http.StatusOK},
+		{name: "password reset email", request: routeRequest{method: http.MethodPost,
+			path: passwordResetEmailPath, body: passwordResetEmailBody}, wantStatus: http.StatusOK},
+		{name: "reset password", request: routeRequest{method: http.MethodPost,
+			path: resetPasswordPath, body: resetPasswordBody}, wantStatus: http.StatusOK},
 	}
 
 	router := routerWithEveryRouteWired()
@@ -281,56 +377,14 @@ func TestBuildRouterReachesEveryRoute(t *testing.T) {
 	}
 }
 
-func TestBuildRouterRejectsUnroutedRequests(t *testing.T) {
-	cases := []struct {
-		name       string
-		method     string
-		path       string
-		wantStatus int
-	}{
-		{name: "unknown path", method: http.MethodGet, path: "/api/nope", wantStatus: http.StatusNotFound},
-		{name: "health rejects POST", method: http.MethodPost, path: HealthRoutePath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "signup rejects GET", method: http.MethodGet, path: signupPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "signin rejects GET", method: http.MethodGet, path: signinPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "verify email rejects GET", method: http.MethodGet, path: verifyEmailPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "current user rejects POST", method: http.MethodPost, path: currentUserPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "request email change rejects GET", method: http.MethodGet, path: requestEmailChangePath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "change password rejects GET", method: http.MethodGet, path: changePasswordPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "token refresh rejects GET", method: http.MethodGet, path: refreshTokenPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "token revoke rejects GET", method: http.MethodGet, path: revokeTokenPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "upload files rejects GET", method: http.MethodGet, path: uploadFilesPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "upload subpath", method: http.MethodPost, path: uploadFilesPath + "/extra",
-			wantStatus: http.StatusNotFound},
-		{name: "profiles rejects GET", method: http.MethodGet, path: profilesPath,
-			wantStatus: http.StatusMethodNotAllowed},
-		{name: "profiles subpath", method: http.MethodPut, path: profilesPath + "/extra",
-			wantStatus: http.StatusNotFound},
-		{name: "unversioned signup", method: http.MethodPost, path: "/api/users/signup",
-			wantStatus: http.StatusNotFound},
-		{name: "unversioned token refresh", method: http.MethodPost, path: "/api/tokens/refresh",
-			wantStatus: http.StatusNotFound},
-	}
-
+// Patterns are exact: a resource route must not swallow deeper paths the way a trailing-slash prefix would.
+func TestBuildRouterAnswersNotFoundBelowAnExactRoute(t *testing.T) {
 	router := BuildRouter(RouterDependencies{})
 
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			recorder := serveRouteRequest(router, routeRequest{method: testCase.method, path: testCase.path})
+	recorder := serveRouteRequest(router, routeRequest{method: http.MethodPatch, path: profilesPath + "/extra"})
 
-			if recorder.Code != testCase.wantStatus {
-				t.Errorf("%s %s = %d, want %d", testCase.method, testCase.path, recorder.Code, testCase.wantStatus)
-			}
-		})
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("PATCH %s/extra = %d, want %d", profilesPath, recorder.Code, http.StatusNotFound)
 	}
 }
 
@@ -345,7 +399,12 @@ func TestBuildRouterRequiresAuthOnlyWhereDeclared(t *testing.T) {
 		{name: "health", request: routeRequest{method: http.MethodGet, path: HealthRoutePath}},
 		{name: "signup", request: routeRequest{method: http.MethodPost, path: signupPath, body: signupBody}},
 		{name: "signin", request: routeRequest{method: http.MethodPost, path: signinPath, body: signupBody}},
+		{name: "google signup", request: routeRequest{method: http.MethodPost, path: googleSignupPath, body: googleIDTokenBody}},
+		{name: "google signin", request: routeRequest{method: http.MethodPost, path: googleSigninPath, body: googleIDTokenBody}},
+		{name: "google sign-in config", request: routeRequest{method: http.MethodGet, path: googleSignInConfigPath}},
 		{name: "verify email", request: routeRequest{method: http.MethodPost, path: verifyEmailPath},
+			requiresAuth: true},
+		{name: "get current user", request: routeRequest{method: http.MethodGet, path: currentUserPath},
 			requiresAuth: true},
 		{name: "delete user", request: routeRequest{method: http.MethodDelete, path: currentUserPath},
 			requiresAuth: true},
@@ -353,12 +412,22 @@ func TestBuildRouterRequiresAuthOnlyWhereDeclared(t *testing.T) {
 			body: requestEmailChangeBody}, requiresAuth: true},
 		{name: "change password", request: routeRequest{method: http.MethodPost, path: changePasswordPath,
 			body: changePasswordBody}, requiresAuth: true},
+		{name: "add password", request: routeRequest{method: http.MethodPost, path: addPasswordPath,
+			body: addPasswordBody}, requiresAuth: true},
+		{name: "add google account", request: routeRequest{method: http.MethodPost, path: addGoogleAccountPath,
+			body: addGoogleAccountBody}, requiresAuth: true},
 		{name: "upload files", request: routeRequest{method: http.MethodPost, path: uploadFilesPath,
 			body: uploadFilesBody, contentType: uploadContentType}, requiresAuth: true},
 		{name: "create profile", request: routeRequest{method: http.MethodPost, path: profilesPath,
 			body: profileBody}, requiresAuth: true},
 		{name: "update profile", request: routeRequest{method: http.MethodPut, path: profilesPath,
 			body: profileBody}, requiresAuth: true},
+		{name: "resend verification email", request: routeRequest{method: http.MethodPost,
+			path: verificationEmailPath}, requiresAuth: true},
+		{name: "password reset email", request: routeRequest{method: http.MethodPost,
+			path: passwordResetEmailPath, body: passwordResetEmailBody}},
+		{name: "reset password", request: routeRequest{method: http.MethodPost,
+			path: resetPasswordPath, body: resetPasswordBody}},
 	}
 
 	router := routerWithEveryRouteWired()

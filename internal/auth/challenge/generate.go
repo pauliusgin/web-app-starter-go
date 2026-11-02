@@ -44,7 +44,7 @@ func Generate(
 
 	minted := token.Generate()
 
-	expiresAt := time.Now().Add(Lifetime)
+	expiresAt := time.Now().Add(LifetimeFor(params.Purpose))
 
 	storedChallenge, err := d.WriteRepository.SaveChallenge(ctx, NewChallenge{
 		ID:         uuid.New(),

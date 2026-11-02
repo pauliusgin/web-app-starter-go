@@ -14,12 +14,15 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
+	uploadmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
+	uploadrepositories "github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 	usermodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
 )
@@ -48,10 +51,27 @@ func ignoringDispatcher() events.Dispatcher {
 	return events.Dispatcher{Recorder: ignoreEvent, Publisher: ignoreEvent}
 }
 
+var pendingPictureID = uuid.MustParse("7d2e5f3c-6a91-4b22-9c4d-3f8b0e7a5d26")
+
+// pendingPictureUploads holds one pending profile picture the test user uploaded, as an upload request would leave it.
+func pendingPictureUploads() *uploadrepositories.InMemoryUploadRepository {
+	return uploadrepositories.NewInMemoryUploadRepository(uploadmodels.Upload{
+		ID:          pendingPictureID,
+		UserID:      testUserID,
+		Purpose:     uploadmodels.PurposeProfilePicture,
+		Kind:        uploadmodels.KindImage,
+		PreviewPath: "picture/preview.webp",
+		PreviewURL:  "https://files.example/picture/preview.webp",
+		CreatedAt:   storedAt,
+		UpdatedAt:   storedAt,
+	})
+}
+
 func createProfileHandler(repository *repositories.InMemoryProfileRepository) http.Handler {
 	dependencies := usecases.CreateProfileDependencies{
 		ProfileWriteRepository: repository,
 		EventDispatcher:        ignoringDispatcher(),
+		AttachUpload:           pendingPictureUploads().AttachUpload,
 	}
 
 	return CreateProfile(CreateProfileDependencies{
@@ -66,6 +86,7 @@ func updateProfileHandler(repository *repositories.InMemoryProfileRepository) ht
 	dependencies := usecases.UpdateProfileDependencies{
 		ProfileWriteRepository: repository,
 		EventDispatcher:        ignoringDispatcher(),
+		AttachUpload:           pendingPictureUploads().AttachUpload,
 	}
 
 	return UpdateProfile(UpdateProfileDependencies{
@@ -134,13 +155,13 @@ func decodeBody(t *testing.T, response *http.Response) map[string]any {
 	return body
 }
 
-func assertErrorCode(t *testing.T, response *http.Response, wantStatus int, wantCode string) {
+func assertErrorCode(t *testing.T, response *http.Response, wantStatus int, wantCode handlers.ErrorCode) {
 	t.Helper()
 
 	if response.StatusCode != wantStatus {
 		t.Fatalf("status = %d, want %d", response.StatusCode, wantStatus)
 	}
-	if code, _ := decodeBody(t, response)["code"].(string); code != wantCode {
+	if code, _ := decodeBody(t, response)["code"].(string); code != string(wantCode) {
 		t.Errorf(`body["code"] = %q, want %q`, code, wantCode)
 	}
 }
@@ -156,13 +177,38 @@ func silenceHandlerLogger(t *testing.T) {
 var invalidProfileBodyCases = []struct {
 	name     string
 	body     string
-	wantCode string
+	wantCode handlers.ErrorCode
 }{
-	{name: "malformed json", body: `{"firstName":`, wantCode: "request_body_invalid"},
+	{name: "malformed json", body: `{"firstName":`, wantCode: handlers.ErrorCodeRequestBodyInvalid},
 	{name: "unknown field", body: `{"firstName":"Ada","lastName":"Lovelace","age":36}`,
-		wantCode: "request_body_invalid"},
-	{name: "missing first name", body: `{"lastName":"Lovelace"}`, wantCode: "first_name_missing"},
-	{name: "blank first name", body: `{"firstName":"  ","lastName":"Lovelace"}`, wantCode: "first_name_missing"},
-	{name: "missing last name", body: `{"firstName":"Ada"}`, wantCode: "last_name_missing"},
-	{name: "empty last name", body: `{"firstName":"Ada","lastName":""}`, wantCode: "last_name_missing"},
+		wantCode: handlers.ErrorCodeRequestBodyInvalid},
+	{name: "missing first name", body: `{"lastName":"Lovelace"}`, wantCode: handlers.ErrorCodeFirstNameMissing},
+	{name: "missing last name", body: `{"firstName":"Ada"}`, wantCode: handlers.ErrorCodeLastNameMissing},
+	{name: "first name with a leading dash", body: `{"firstName":"-Taylor","lastName":"Joy"}`,
+		wantCode: handlers.ErrorCodeFirstNameInvalid},
+	{name: "last name with a digit", body: `{"firstName":"Ada","lastName":"Lovelace3"}`,
+		wantCode: handlers.ErrorCodeLastNameInvalid},
+	{name: "malformed picture upload id", body: `{"firstName":"Ada","lastName":"Lovelace","pictureUploadId":"me.jpg"}`,
+		wantCode: handlers.ErrorCodeProfilePictureUploadInvalid},
+	{name: "unknown picture upload", body: `{"firstName":"Ada","lastName":"Lovelace",` +
+		`"pictureUploadId":"0b6f3a52-1c4d-4e8f-9a2b-7c5d3e1f0a94"}`,
+		wantCode: handlers.ErrorCodeProfilePictureUploadInvalid},
+}
+
+// assertPictureResponse checks the picture object a profile response carries: the upload id when one is attached,
+// and null for every other field, as the in-memory profile store holds no upload URLs.
+func assertPictureResponse(t *testing.T, body map[string]any, wantUploadID any) {
+	t.Helper()
+
+	picture, isObject := body["picture"].(map[string]any)
+	if !isObject {
+		t.Fatalf(`body["picture"] = %v, want an object`, body["picture"])
+	}
+	want := map[string]any{"uploadId": wantUploadID, "previewUrl": nil, "originalUrl": nil}
+	for key, wantValue := range want {
+		gotValue, present := picture[key]
+		if !present || gotValue != wantValue {
+			t.Errorf("picture[%q] = %v (present %v), want %v", key, gotValue, present, wantValue)
+		}
+	}
 }

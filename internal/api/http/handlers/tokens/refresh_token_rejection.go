@@ -8,13 +8,7 @@ import (
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
 )
 
-const (
-	wwwAuthenticateHeader = "WWW-Authenticate"
-	invalidTokenChallenge = `Bearer error="invalid_token"`
-)
-
 const invalidRefreshTokenText = "invalid refresh token"
-const refreshTokenRejectedText = "rejected a refresh token"
 const unexpectedRefreshTokenFailureText = "could not complete the refresh token request"
 
 // One code for every refresh token rejection, so a client cannot tell a missing cookie, a revoked token
@@ -34,13 +28,12 @@ var refreshTokenRules = []handlers.RejectionRule{
 func writeRefreshTokenFailure(w http.ResponseWriter, err error) {
 	if _, rejected := handlers.SelectRejection(err, refreshTokenRules); rejected {
 		ClearRefreshTokenCookie(w)
-		w.Header().Set(wwwAuthenticateHeader, invalidTokenChallenge)
+		w.Header().Set(handlers.WWWAuthenticateHeader, handlers.InvalidTokenChallenge)
 	}
 
 	handlers.WriteRejection(w, handlers.WriteRejectionParams{
 		Err:                   err,
 		RuleSets:              [][]handlers.RejectionRule{refreshTokenRules},
 		UnexpectedFailureText: unexpectedRefreshTokenFailureText,
-		RejectedLogText:       refreshTokenRejectedText,
 	})
 }

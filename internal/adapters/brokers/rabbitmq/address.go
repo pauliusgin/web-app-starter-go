@@ -6,7 +6,7 @@ const unknownBrokerAddress = "unknown"
 
 const defaultVHostPath = "/"
 
-// BrokerAddress returns the broker's host and vhost, or "unknown" when the URL will not parse.
+// SanitizeBrokerAddress returns the broker's host and vhost, or "unknown" when the URL will not parse.
 func SanitizeBrokerAddress(amqpURL string) string {
 	parsed, err := url.Parse(amqpURL)
 	if err != nil || parsed.Host == "" {

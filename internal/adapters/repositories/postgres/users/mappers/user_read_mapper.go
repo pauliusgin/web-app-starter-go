@@ -6,7 +6,8 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
 )
 
-// UserReadModelFromIDMapper maps the GetUserReadModelByID row onto the read model; NULL → nil.
+// UserReadModelFromIDMapper maps a GetUserReadModelByID row; NULL columns become nil pointers
+// and the credential flags become the user's sign-in methods.
 func UserReadModelFromIDMapper(row sqlc.GetUserReadModelByIDRow) models.UserReadModel {
 	mapped := models.UserReadModel{
 		ID:              row.ID,
@@ -16,6 +17,10 @@ func UserReadModelFromIDMapper(row sqlc.GetUserReadModelByIDRow) models.UserRead
 		SigninAt:        sqlnull.TimePointer(row.SigninAt),
 		FirstName:       sqlnull.StringPointer(row.FirstName),
 		LastName:        sqlnull.StringPointer(row.LastName),
+		SignInMethods: models.NewSignInMethods(models.SignInMethodsParams{
+			HasPassword:      row.HasPassword,
+			HasGoogleSubject: row.HasGoogleSubject,
+		}),
 	}
 
 	return mapped

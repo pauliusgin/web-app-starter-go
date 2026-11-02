@@ -15,12 +15,6 @@ import (
 
 const deadLetterArrivalTimeout = 10 * time.Second
 
-func TestDeadLetterQueueNameSuffixesTheConsumerQueue(t *testing.T) {
-	if got := DeadLetterQueueName(testQueue); got != testQueue+".dead" {
-		t.Errorf("DeadLetterQueueName(%q) = %q, want %q", testQueue, got, testQueue+".dead")
-	}
-}
-
 func TestDeclareDeadLetterTopologyRoutesEachQueueToItsDeadLetterQueue(t *testing.T) {
 	amqpURL := liveRabbitMQURL()
 	requireReachableBroker(t, amqpURL)

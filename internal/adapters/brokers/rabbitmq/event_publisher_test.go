@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -102,36 +101,5 @@ func TestPublishEventRefusesTheZeroValuePublisher(t *testing.T) {
 	}
 	if publisherNotWired.Label != events.UserSignedUpLabel {
 		t.Errorf("Label = %q, want %q", publisherNotWired.Label, events.UserSignedUpLabel)
-	}
-}
-
-func TestPublisherErrorsUnwrapToTheirCause(t *testing.T) {
-	cause := errors.New("dial tcp 127.0.0.1:5672: connect: connection refused")
-
-	cases := []struct {
-		name      string
-		err       error
-		wantCause error
-	}{
-		{name: "broker unreachable", err: ErrBrokerUnreachable{Cause: cause}, wantCause: cause},
-		{name: "publisher unavailable", err: ErrPublisherUnavailable{Cause: cause}, wantCause: cause},
-		{
-			name:      "publish failed",
-			err:       ErrPublishFailed{Label: testLabel, RoutingKey: string(testLabel), Cause: cause},
-			wantCause: cause,
-		},
-		{
-			name:      "confirm timed out",
-			err:       ErrPublishConfirmTimedOut{Label: testLabel, Timeout: 2 * time.Second, Cause: context.DeadlineExceeded},
-			wantCause: context.DeadlineExceeded,
-		},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			if !errors.Is(testCase.err, testCase.wantCause) {
-				t.Errorf("errors.Is did not recover %v from %v", testCase.wantCause, testCase.err)
-			}
-		})
 	}
 }

@@ -5,6 +5,8 @@ SELECT
   u.created_at,
   u.email_verified_at,
   u.signin_at,
+  (u.password_hash IS NOT NULL)::bool AS has_password,
+  (u.google_subject IS NOT NULL)::bool AS has_google_subject,
   p.first_name,
   p.last_name
 FROM

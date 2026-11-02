@@ -1,6 +1,4 @@
-// Package scheduler runs recurring jobs on a cron schedule. It is a driving adapter: it calls
-// into use cases on a timer the same way the HTTP layer calls into them on a request, and it
-// knows nothing about what any individual job does.
+// Package scheduler drives use cases on a cron schedule, as the HTTP layer does per request.
 package scheduler
 
 import (

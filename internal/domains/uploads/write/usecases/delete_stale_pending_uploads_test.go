@@ -14,9 +14,10 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/events"
+	"github.com/pauliusgin/web_app_starter-be/internal/events/eventstest"
 )
 
-// cleanupCutoff mirrors the cutoff the use case derives from the wall clock; fixtures sit hours away
+// cleanupCutoff mirrors the cutoff the repository derives from the wall clock; fixtures sit hours away
 // from it, so the few milliseconds between the two clock reads cannot flip a verdict.
 var cleanupCutoff = time.Now().Add(-models.PendingUploadRetention)
 
@@ -32,7 +33,7 @@ func storedImage(id uuid.UUID, createdAt time.Time) models.Upload {
 	return models.Upload{
 		ID:           id,
 		UserID:       testUserID,
-		Purpose:      models.PurposeProfilePicture,
+		Purpose:      models.PurposeDocumentAttachment,
 		Kind:         models.KindImage,
 		OriginalPath: id.String() + "/original.jpg",
 		PreviewPath:  id.String() + "/preview.webp",
@@ -56,7 +57,7 @@ func storedDocument(id uuid.UUID, createdAt time.Time) models.Upload {
 type deleteStalePendingUploadsFixture struct {
 	repository  *repositories.InMemoryUploadRepository
 	fileStorage *storage.InMemoryFileStorage
-	captured    *capturedEvents
+	captured    *eventstest.CapturedEvents
 }
 
 func newDeleteStalePendingUploadsFixture() deleteStalePendingUploadsFixture {
@@ -70,17 +71,10 @@ func newDeleteStalePendingUploadsFixture() deleteStalePendingUploadsFixture {
 		attached,
 	}
 
-	fileStorage := storage.NewInMemoryFileStorage()
-	for _, upload := range uploads {
-		for _, path := range upload.StoredPaths() {
-			fileStorage.Files[path] = storage.StoreFileParams{Path: path}
-		}
-	}
-
 	return deleteStalePendingUploadsFixture{
 		repository:  repositories.NewInMemoryUploadRepository(uploads...),
-		fileStorage: fileStorage,
-		captured:    &capturedEvents{},
+		fileStorage: fileStorageHolding(uploads...),
+		captured:    &eventstest.CapturedEvents{},
 	}
 }
 
@@ -88,17 +82,32 @@ func (f deleteStalePendingUploadsFixture) deleteStale() (DeleteStalePendingUploa
 	return DeleteStalePendingUploads(context.Background(), DeleteStalePendingUploadsDependencies{
 		UploadWriteRepository: f.repository,
 		FileStorage:           f.fileStorage,
-		EventDispatcher:       f.captured.dispatcher(),
+		EventDispatcher:       f.captured.Dispatcher(),
 	})
 }
 
 func (f deleteStalePendingUploadsFixture) remainingUploadIDs() []uuid.UUID {
+	return uploadIDsOf(f.repository.Uploads)
+}
+
+func uploadIDsOf(uploads []models.Upload) []uuid.UUID {
 	var ids []uuid.UUID
-	for _, upload := range f.repository.Uploads {
+	for _, upload := range uploads {
 		ids = append(ids, upload.ID)
 	}
 
 	return ids
+}
+
+func fileStorageHolding(uploads ...models.Upload) *storage.InMemoryFileStorage {
+	fileStorage := storage.NewInMemoryFileStorage()
+	for _, upload := range uploads {
+		for _, path := range upload.StoredPaths() {
+			fileStorage.Files[path] = storage.StoreFileParams{Path: path}
+		}
+	}
+
+	return fileStorage
 }
 
 func TestDeleteStalePendingUploadsRemovesOnlyUnattachedUploadsOlderThanTheCutoff(t *testing.T) {
@@ -136,11 +145,11 @@ func TestDeleteStalePendingUploadsAnnouncesEachRemovedUpload(t *testing.T) {
 		t.Fatalf("DeleteStalePendingUploads: %v", err)
 	}
 
-	if len(fixture.captured.recorded) != 2 || len(fixture.captured.published) != 2 {
+	if len(fixture.captured.Recorded) != 2 || len(fixture.captured.Published) != 2 {
 		t.Fatalf("recorded = %d, published = %d, want 2 each",
-			len(fixture.captured.recorded), len(fixture.captured.published))
+			len(fixture.captured.Recorded), len(fixture.captured.Published))
 	}
-	for index, event := range fixture.captured.published {
+	for index, event := range fixture.captured.Published {
 		if event.Label != events.UploadDeletedLabel {
 			t.Errorf("event %d label = %q, want %q", index, event.Label, events.UploadDeletedLabel)
 		}
@@ -177,8 +186,8 @@ func TestDeleteStalePendingUploadsKeepsRowsWhoseFilesCannotBeDeleted(t *testing.
 	if len(fixture.repository.Uploads) != 4 {
 		t.Errorf("uploads left = %d, want all 4 kept for the next run", len(fixture.repository.Uploads))
 	}
-	if len(fixture.captured.published) != 0 {
-		t.Errorf("published = %d, want no events", len(fixture.captured.published))
+	if len(fixture.captured.Published) != 0 {
+		t.Errorf("published = %d, want no events", len(fixture.captured.Published))
 	}
 }
 
@@ -194,8 +203,8 @@ func TestDeleteStalePendingUploadsReportsRowsTheDatabaseCannotDelete(t *testing.
 	if result.DeletedCount != 0 {
 		t.Errorf("deleted = %d, want 0", result.DeletedCount)
 	}
-	if len(fixture.captured.published) != 0 {
-		t.Errorf("published = %d, want no events", len(fixture.captured.published))
+	if len(fixture.captured.Published) != 0 {
+		t.Errorf("published = %d, want no events", len(fixture.captured.Published))
 	}
 }
 

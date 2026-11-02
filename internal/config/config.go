@@ -62,7 +62,8 @@ type Config struct {
 	FrontendBaseURL string
 	Brevo           BrevoConfig
 	Firebase        FirebaseConfig
-	AppEnv          string
+	Google          GoogleConfig
+	AppEnv          AppEnv
 }
 
 // ListenAddress is the host:port string the HTTP server binds to.
@@ -112,16 +113,16 @@ func Load() (Config, error) {
 	firebase, err := loadFirebaseConfig()
 	failures = append(failures, err)
 
+	google, err := loadGoogleConfig()
+	failures = append(failures, err)
+
 	frontendBaseURL, err := readRequiredVariable(readRequiredVariableParams{
 		Variable:    FrontendBaseURLVariable,
 		Expectation: frontendBaseURLExpectationText,
 	})
 	failures = append(failures, err)
 
-	appEnv, err := readRequiredVariable(readRequiredVariableParams{
-		Variable:    AppEnvVariable,
-		Expectation: appEnvExpectationText,
-	})
+	appEnv, err := readAppEnvVariable()
 	failures = append(failures, err)
 
 	if joined := errors.Join(failures...); joined != nil {
@@ -137,6 +138,7 @@ func Load() (Config, error) {
 		FrontendBaseURL: frontendBaseURL,
 		Brevo:           brevo,
 		Firebase:        firebase,
+		Google:          google,
 		AppEnv:          appEnv,
 	}, nil
 }

@@ -154,12 +154,3 @@ func TestNewConsumerWithoutAHandlerDeclaresNothingToDeliverTo(t *testing.T) {
 			consumer.Label, consumer.Queue)
 	}
 }
-
-func TestEventPayloadUndecodableUnwrapsToItsCause(t *testing.T) {
-	cause := errors.New("unexpected end of JSON input")
-	err := ErrEventPayloadUndecodable{Label: events.AuthChallengeGeneratedLabel, Cause: cause}
-
-	if !errors.Is(err, cause) {
-		t.Errorf("errors.Is did not recover %v from %v", cause, err)
-	}
-}

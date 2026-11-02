@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/repositories/uploadrepositorytest"
 )
@@ -18,6 +19,7 @@ func TestInMemoryUploadRepositoryHonoursTheContract(t *testing.T) {
 				WriteRepository: repository,
 				ReadRepository:  repository,
 				SeedUser:        func(*testing.T) uuid.UUID { return uuid.New() },
+				ReferenceUpload: func(_ *testing.T, upload models.Upload) { repository.ReferenceUpload(upload.ID) },
 			}
 		},
 	})

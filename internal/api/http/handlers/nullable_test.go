@@ -5,30 +5,46 @@ import (
 	"time"
 )
 
-func TestNullableStringAnswersNilForTheEmptyString(t *testing.T) {
-	if got := NullableString(""); got != nil {
-		t.Errorf("NullableString(\"\") = %q, want nil", *got)
+func TestNullableString(t *testing.T) {
+	ada := "Ada"
+	cases := []struct {
+		name  string
+		value string
+		want  *string
+	}{
+		{name: "empty answers nil", value: ""},
+		{name: "text is pointed to", value: ada, want: &ada},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := NullableString(testCase.value)
+
+			if (got == nil) != (testCase.want == nil) || (got != nil && *got != *testCase.want) {
+				t.Errorf("NullableString(%q) = %v, want %v", testCase.value, got, testCase.want)
+			}
+		})
 	}
 }
 
-func TestNullableStringPointsAtAPresentValue(t *testing.T) {
-	got := NullableString("Ada")
-	if got == nil || *got != "Ada" {
-		t.Errorf("NullableString(\"Ada\") = %v, want a pointer to \"Ada\"", got)
+func TestNullableTime(t *testing.T) {
+	verifiedAt := time.Date(2026, time.March, 4, 10, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		value time.Time
+		want  *time.Time
+	}{
+		{name: "zero time answers nil", value: time.Time{}},
+		{name: "time is pointed to", value: verifiedAt, want: &verifiedAt},
 	}
-}
 
-func TestNullableTimeAnswersNilForTheZeroTime(t *testing.T) {
-	if got := NullableTime(time.Time{}); got != nil {
-		t.Errorf("NullableTime(zero) = %v, want nil", *got)
-	}
-}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := NullableTime(testCase.value)
 
-func TestNullableTimePointsAtAPresentValue(t *testing.T) {
-	stamp := time.Date(2026, 3, 15, 8, 30, 0, 0, time.UTC)
-
-	got := NullableTime(stamp)
-	if got == nil || !got.Equal(stamp) {
-		t.Errorf("NullableTime(%v) = %v, want a pointer to it", stamp, got)
+			if (got == nil) != (testCase.want == nil) || (got != nil && !got.Equal(*testCase.want)) {
+				t.Errorf("NullableTime(%v) = %v, want %v", testCase.value, got, testCase.want)
+			}
+		})
 	}
 }

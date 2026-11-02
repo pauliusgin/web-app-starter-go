@@ -9,7 +9,7 @@ import (
 
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/sqlc"
 	"github.com/pauliusgin/web_app_starter-be/internal/adapters/repositories/postgres/users/mappers"
-	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
+	e "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
 	read "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/repositories"
 )
@@ -26,14 +26,14 @@ func NewUserReadRepository(queries *sqlc.Queries) UserReadRepository {
 	return UserReadRepository{queries: queries}
 }
 
-// GetUserReadModelByID returns the user with the given ID, or usererrors.ErrUserNotFound.
+// GetUserReadModelByID returns the user with the given ID, or e.ErrUserNotFound.
 func (r UserReadRepository) GetUserReadModelByID(ctx context.Context, id uuid.UUID) (models.UserReadModel, error) {
 	row, err := r.queries.GetUserReadModelByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return models.UserReadModel{}, usererrors.ErrUserNotFound{ID: id}
+		return models.UserReadModel{}, e.ErrUserNotFound{ID: id}
 	}
 	if err != nil {
-		return models.UserReadModel{}, usererrors.ErrFindUserFailed{ID: id, Cause: err}
+		return models.UserReadModel{}, e.ErrFindUserFailed{ID: id, Cause: err}
 	}
 
 	return mappers.UserReadModelFromIDMapper(row), nil
