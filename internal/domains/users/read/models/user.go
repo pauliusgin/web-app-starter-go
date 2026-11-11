@@ -8,15 +8,16 @@ import (
 )
 
 // UserReadModel is a returned user as clients see it; a nil pointer is a value the user does not have yet.
+// It is also the HTTP response body: json keys are API contract, and a missing detail encodes as null.
 type UserReadModel struct {
-	ID              uuid.UUID
-	Email           string
-	CreatedAt       time.Time
-	EmailVerifiedAt *time.Time
-	SigninAt        *time.Time
-	FirstName       *string
-	LastName        *string
-	SignInMethods   []SignInMethod
+	ID              uuid.UUID      `json:"id"`
+	Email           string         `json:"email"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	EmailVerifiedAt *time.Time     `json:"emailVerifiedAt"`
+	SigninAt        *time.Time     `json:"signinAt"`
+	FirstName       *string        `json:"firstName"`
+	LastName        *string        `json:"lastName"`
+	SignInMethods   []SignInMethod `json:"signInMethods"`
 }
 
 // SignInMethod is one way a user can prove who they are when signing in.

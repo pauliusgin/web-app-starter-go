@@ -215,6 +215,7 @@ func TestUploadFilesAnswersCreatedWithBothURLsOfAnImage(t *testing.T) {
 	saved := harness.repository.Uploads[0]
 	want := map[string]any{
 		"id":          saved.ID.String(),
+		"userId":      uploadingUserID.String(),
 		"purpose":     "document_attachment",
 		"kind":        "image",
 		"mimeType":    "image/jpeg",

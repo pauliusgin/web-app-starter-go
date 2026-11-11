@@ -4,26 +4,17 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
-	"github.com/google/uuid"
+	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	usererrors "github.com/pauliusgin/web_app_starter-be/internal/domains/users/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/users/read/queries"
 )
 
 type getUserByIDResponse struct {
-	ID              uuid.UUID             `json:"id"`
-	Email           string                `json:"email"`
-	CreatedAt       time.Time             `json:"createdAt"`
-	EmailVerifiedAt *time.Time            `json:"emailVerifiedAt"`
-	SigninAt        *time.Time            `json:"signinAt"`
-	FirstName       *string               `json:"firstName"`
-	LastName        *string               `json:"lastName"`
-	SignInMethods   []models.SignInMethod `json:"signInMethods"`
+	readmodels.UserReadModel
 }
 
 // GetUserByIDUseCase is the read-side lookup the current-user handler depends on.
@@ -56,25 +47,16 @@ func GetUserByID(d GetUserByIDDependencies) http.HandlerFunc {
 	}
 }
 
-func buildGetUserByIDResponse(user models.UserReadModel) getUserByIDResponse {
-	return getUserByIDResponse{
-		ID:              user.ID,
-		Email:           user.Email,
-		CreatedAt:       user.CreatedAt,
-		EmailVerifiedAt: user.EmailVerifiedAt,
-		SigninAt:        user.SigninAt,
-		FirstName:       user.FirstName,
-		LastName:        user.LastName,
-		SignInMethods:   user.SignInMethods,
-	}
-}
-
 var getUserByIDRules = []handlers.RejectionRule{
 	handlers.RejectWhen[usererrors.ErrUserNotFound](handlers.Rejection{
 		Status:  http.StatusNotFound,
 		Code:    handlers.ErrorCodeUserNotFound,
 		Message: userNotFoundText,
 	}),
+}
+
+func buildGetUserByIDResponse(user readmodels.UserReadModel) getUserByIDResponse {
+	return getUserByIDResponse{UserReadModel: user}
 }
 
 func writeGetUserByIDFailure(w http.ResponseWriter, err error) {

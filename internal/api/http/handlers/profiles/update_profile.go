@@ -5,13 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/google/uuid"
+	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/input"
 	profileerrors "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 )
@@ -23,16 +22,7 @@ type updateProfileRequest struct {
 }
 
 type updateProfileResponse struct {
-	ID        uuid.UUID                    `json:"id"`
-	FirstName string                       `json:"firstName"`
-	LastName  string                       `json:"lastName"`
-	Picture   updateProfilePictureResponse `json:"picture"`
-}
-
-type updateProfilePictureResponse struct {
-	UploadID    *uuid.UUID `json:"uploadId"`
-	PreviewURL  *string    `json:"previewUrl"`
-	OriginalURL *string    `json:"originalUrl"`
+	readmodels.ProfileReadModel
 }
 
 // UpdateProfileUseCase is the domain call the profile update handler depends on.
@@ -99,22 +89,13 @@ func UpdateProfile(d UpdateProfileDependencies) http.HandlerFunc {
 	}
 }
 
-func buildUpdateProfileResponse(profile models.ProfileReadModel) updateProfileResponse {
-	return updateProfileResponse{
-		ID:        profile.ID,
-		FirstName: profile.FirstName,
-		LastName:  profile.LastName,
-		Picture: updateProfilePictureResponse{
-			UploadID:    profile.Picture.UploadID,
-			PreviewURL:  profile.Picture.PreviewURL,
-			OriginalURL: profile.Picture.OriginalURL,
-		},
-	}
-}
-
 var updateProfileRules = []handlers.RejectionRule{
 	handlers.RejectWhen[profileerrors.ErrProfileNotFound](
 		handlers.Rejection{Status: http.StatusNotFound, Code: handlers.ErrorCodeProfileNotFound}),
+}
+
+func buildUpdateProfileResponse(profile readmodels.ProfileReadModel) updateProfileResponse {
+	return updateProfileResponse{ProfileReadModel: profile}
 }
 
 func writeUpdateProfileFailure(w http.ResponseWriter, err error) {

@@ -22,17 +22,12 @@ import (
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/uploads/write/usecases"
 )
 
-type uploadedFileResponse struct {
-	ID          uuid.UUID `json:"id"`
-	Purpose     string    `json:"purpose"`
-	Kind        string    `json:"kind"`
-	MimeType    string    `json:"mimeType"`
-	OriginalURL *string   `json:"originalUrl"`
-	PreviewURL  *string   `json:"previewUrl"`
-}
-
 type uploadFilesResponse struct {
 	Uploads []uploadedFileResponse `json:"uploads"`
+}
+
+type uploadedFileResponse struct {
+	models.UploadReadModel
 }
 
 const (
@@ -196,20 +191,16 @@ func firstFormValue(form *multipart.Form, field string) string {
 }
 
 func buildUploadFilesResponse(uploads []models.UploadReadModel) uploadFilesResponse {
-	response := uploadFilesResponse{Uploads: make([]uploadedFileResponse, 0, len(uploads))}
-
+	listed := make([]uploadedFileResponse, 0, len(uploads))
 	for _, upload := range uploads {
-		response.Uploads = append(response.Uploads, uploadedFileResponse{
-			ID:          upload.ID,
-			Purpose:     upload.Purpose,
-			Kind:        upload.Kind,
-			MimeType:    upload.MimeType,
-			OriginalURL: upload.OriginalURL,
-			PreviewURL:  upload.PreviewURL,
-		})
+		listed = append(listed, buildUploadedFileResponse(upload))
 	}
 
-	return response
+	return uploadFilesResponse{Uploads: listed}
+}
+
+func buildUploadedFileResponse(upload models.UploadReadModel) uploadedFileResponse {
+	return uploadedFileResponse{UploadReadModel: upload}
 }
 
 var uploadFormRules = []handlers.RejectionRule{

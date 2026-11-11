@@ -6,13 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/google/uuid"
+	readmodels "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/middleware"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/input"
 	profileerrors "github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/errors"
-	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/models"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/read/queries"
 	"github.com/pauliusgin/web_app_starter-be/internal/domains/profiles/write/usecases"
 )
@@ -24,16 +23,7 @@ type createProfileRequest struct {
 }
 
 type createProfileResponse struct {
-	ID        uuid.UUID                    `json:"id"`
-	FirstName string                       `json:"firstName"`
-	LastName  string                       `json:"lastName"`
-	Picture   createProfilePictureResponse `json:"picture"`
-}
-
-type createProfilePictureResponse struct {
-	UploadID    *uuid.UUID `json:"uploadId"`
-	PreviewURL  *string    `json:"previewUrl"`
-	OriginalURL *string    `json:"originalUrl"`
+	readmodels.ProfileReadModel
 }
 
 // CreateProfileUseCase is the domain call the profile creation handler depends on.
@@ -100,22 +90,13 @@ func CreateProfile(d CreateProfileDependencies) http.HandlerFunc {
 	}
 }
 
-func buildCreateProfileResponse(profile models.ProfileReadModel) createProfileResponse {
-	return createProfileResponse{
-		ID:        profile.ID,
-		FirstName: profile.FirstName,
-		LastName:  profile.LastName,
-		Picture: createProfilePictureResponse{
-			UploadID:    profile.Picture.UploadID,
-			PreviewURL:  profile.Picture.PreviewURL,
-			OriginalURL: profile.Picture.OriginalURL,
-		},
-	}
-}
-
 var createProfileRules = []handlers.RejectionRule{
 	handlers.RejectWhen[profileerrors.ErrProfileAlreadyExists](
 		handlers.Rejection{Status: http.StatusConflict, Code: handlers.ErrorCodeProfileExists}),
+}
+
+func buildCreateProfileResponse(profile readmodels.ProfileReadModel) createProfileResponse {
+	return createProfileResponse{ProfileReadModel: profile}
 }
 
 func writeCreateProfileFailure(w http.ResponseWriter, err error) {

@@ -3,9 +3,6 @@ package users
 import (
 	"context"
 	"net/http"
-	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/input"
@@ -20,15 +17,8 @@ type signInUserGoogleRequest struct {
 }
 
 type signInUserGoogleResponse struct {
-	ID              uuid.UUID                 `json:"id"`
-	Email           string                    `json:"email"`
-	CreatedAt       time.Time                 `json:"createdAt"`
-	EmailVerifiedAt *time.Time                `json:"emailVerifiedAt"`
-	SigninAt        *time.Time                `json:"signinAt"`
-	FirstName       *string                   `json:"firstName"`
-	LastName        *string                   `json:"lastName"`
-	SignInMethods   []readmodels.SignInMethod `json:"signInMethods"`
-	AccessToken     string                    `json:"accessToken"`
+	readmodels.UserReadModel
+	AccessToken string `json:"accessToken"`
 }
 
 // SignInUserGoogleUseCase is the domain call the google sign-in handler depends on.
@@ -94,17 +84,7 @@ func SignInUserGoogle(d SignInUserGoogleDependencies) http.HandlerFunc {
 }
 
 func buildSignInUserGoogleResponse(user readmodels.UserReadModel, accessToken string) signInUserGoogleResponse {
-	return signInUserGoogleResponse{
-		ID:              user.ID,
-		Email:           user.Email,
-		CreatedAt:       user.CreatedAt,
-		EmailVerifiedAt: user.EmailVerifiedAt,
-		SigninAt:        user.SigninAt,
-		FirstName:       user.FirstName,
-		LastName:        user.LastName,
-		SignInMethods:   user.SignInMethods,
-		AccessToken:     accessToken,
-	}
+	return signInUserGoogleResponse{UserReadModel: user, AccessToken: accessToken}
 }
 
 var signInGoogleRules = []handlers.RejectionRule{

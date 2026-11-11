@@ -3,7 +3,6 @@ package users
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -21,15 +20,8 @@ type signInUserRequest struct {
 }
 
 type signInUserResponse struct {
-	ID              uuid.UUID             `json:"id"`
-	Email           string                `json:"email"`
-	CreatedAt       time.Time             `json:"createdAt"`
-	EmailVerifiedAt *time.Time            `json:"emailVerifiedAt"`
-	SigninAt        *time.Time            `json:"signinAt"`
-	FirstName       *string               `json:"firstName"`
-	LastName        *string               `json:"lastName"`
-	SignInMethods   []models.SignInMethod `json:"signInMethods"`
-	AccessToken     string                `json:"accessToken"`
+	models.UserReadModel
+	AccessToken string `json:"accessToken"`
 }
 
 // SignInUserUseCase is the domain call the sign-in handler depends on.
@@ -98,17 +90,7 @@ func SignInUser(d SignInUserDependencies) http.HandlerFunc {
 }
 
 func buildSignInUserResponse(user models.UserReadModel, accessToken string) signInUserResponse {
-	return signInUserResponse{
-		ID:              user.ID,
-		Email:           user.Email,
-		CreatedAt:       user.CreatedAt,
-		EmailVerifiedAt: user.EmailVerifiedAt,
-		SigninAt:        user.SigninAt,
-		FirstName:       user.FirstName,
-		LastName:        user.LastName,
-		SignInMethods:   user.SignInMethods,
-		AccessToken:     accessToken,
-	}
+	return signInUserResponse{UserReadModel: user, AccessToken: accessToken}
 }
 
 var signInRules = []handlers.RejectionRule{

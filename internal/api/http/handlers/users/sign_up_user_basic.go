@@ -4,9 +4,7 @@ package users
 import (
 	"context"
 	"net/http"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/handlers"
 	"github.com/pauliusgin/web_app_starter-be/internal/api/http/validators/input"
 	"github.com/pauliusgin/web_app_starter-be/internal/auth/jwt"
@@ -21,15 +19,8 @@ type signUpUserRequest struct {
 }
 
 type signUpUserResponse struct {
-	ID              uuid.UUID                 `json:"id"`
-	Email           string                    `json:"email"`
-	CreatedAt       time.Time                 `json:"createdAt"`
-	EmailVerifiedAt *time.Time                `json:"emailVerifiedAt"`
-	SigninAt        *time.Time                `json:"signinAt"`
-	FirstName       *string                   `json:"firstName"`
-	LastName        *string                   `json:"lastName"`
-	SignInMethods   []readmodels.SignInMethod `json:"signInMethods"`
-	AccessToken     string                    `json:"accessToken"`
+	readmodels.UserReadModel
+	AccessToken string `json:"accessToken"`
 }
 
 // SignUpUserUseCase is the domain call the signup handler depends on.
@@ -95,17 +86,7 @@ func SignUpUser(d SignUpUserDependencies) http.HandlerFunc {
 }
 
 func buildSignUpUserResponse(user readmodels.UserReadModel, accessToken string) signUpUserResponse {
-	return signUpUserResponse{
-		ID:              user.ID,
-		Email:           user.Email,
-		CreatedAt:       user.CreatedAt,
-		EmailVerifiedAt: user.EmailVerifiedAt,
-		SigninAt:        user.SigninAt,
-		FirstName:       user.FirstName,
-		LastName:        user.LastName,
-		SignInMethods:   user.SignInMethods,
-		AccessToken:     accessToken,
-	}
+	return signUpUserResponse{UserReadModel: user, AccessToken: accessToken}
 }
 
 var signUpRules = []handlers.RejectionRule{

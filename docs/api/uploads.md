@@ -89,6 +89,7 @@ interface UploadFilesResponse {
 
 interface UploadedFile {
   id: string; // uuid — reference this from the resource using the file
+  userId: string; // uuid; the caller, who owns it
   purpose: UploadPurpose;
   kind: UploadKind;
   mimeType: string; // of the stored file: image/jpeg | image/png | image/webp | application/pdf; always image/webp for preview-only purposes
@@ -102,6 +103,7 @@ interface UploadedFile {
   "uploads": [
     {
       "id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
+      "userId": "1c9d4e2b-5f80-4a11-8b3c-2e7a9d6f4c15",
       "purpose": "document_attachment",
       "kind": "image",
       "mimeType": "image/png",
@@ -110,6 +112,7 @@ interface UploadedFile {
     },
     {
       "id": "1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9",
+      "userId": "1c9d4e2b-5f80-4a11-8b3c-2e7a9d6f4c15",
       "purpose": "document_attachment",
       "kind": "image",
       "mimeType": "image/jpeg",
